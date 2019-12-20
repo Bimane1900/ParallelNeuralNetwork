@@ -20,3 +20,7 @@ struct NeuralNetwork{
 } typedef NeuralNetwork;
 
 #define AVXLOAD 8
+#define EMITTER 0
+#define GATHERER 1
+#define ROWS 1151
+#define COLUMNS 20
