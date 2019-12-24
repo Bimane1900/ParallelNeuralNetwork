@@ -24,3 +24,5 @@ struct NeuralNetwork{
 #define GATHERER 1
 #define ROWS 1151
 #define COLUMNS 20
+#define WORKERS 4
+#define PROCESSES 6
