@@ -9,10 +9,15 @@
 #include "structs.h"
 #include "stdio.h"
 #include "string.h"
+//#include "FF.c"
 
 void printData(float* data, int rows, int columns);
 float sigmoid(float x, int derivate);
 void setupFeatureScaling(float *data, float* testData, int n);
+void setupFeedforward();
+void handleSetupFeedforward();
+void recieveSetupFeedforward(NeuralNetwork* nn);
+void initweights(float* weights);
 void featureScale(float *inputData, float max, float min, int n);
 void handleFeatureScaling(int n);
 void recieveFeatureScaledData(float* data, int n);
@@ -20,7 +25,7 @@ void readInputData(char* textfile, float* data, float* correctRes);
 float _mm256_find_max(__m256 vector);
 float _mm256_find_min(__m256 vector);
 void find_min_max(float* data, int rows, int columns, float* max, float* min);
-NeuralNetwork initNN(int n);
+NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW);
 
 void printData(float* data, int rows, int columns){
     for (int i = 0; i < rows; i++)
@@ -201,12 +206,93 @@ void find_min_max(float* data, int rows, int columns, float* max, float* min){
     *max = _mm256_find_max(max_vector);
     *min = _mm256_find_min(min_vector);
 }
+void initweights(float* weights,int size)
+{
+    __m256 one_vec = _mm256_set1_ps(1.0f);
+    __m256 twos_vec = _mm256_set1_ps(2.0f);
+    __m256 RANDMAX_vec = _mm256_set1_ps(RAND_MAX);
+    for (int i = 0; i < size; i++)
+    {
+        weights[i] = (float)rand();
+    }
+    for (int i = 0; i < size; i+=AVXLOAD)
+	{
+        __m256 rand_vector = _mm256_div_ps(_mm256_load_ps(weights+i),RANDMAX_vec);
+        rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
+        rand_vector = _mm256_sub_ps(rand_vector,one_vec);
+        _mm256_store_ps(weights+i,rand_vector);
+	}
+}
+
+void setupFeedforward()
+{
+    int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
+    for (int i = 2; i < PROCESSES; i++)
+    {
+        MPI_Send(&WeightSize, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+    }     
+}
+
+void handleSetupFeedforward()
+{
+    int incoming;
+    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
+    MPI_Recv(&incoming, 1, MPI_INT, EMITTER, 0, MPI_COMM_WORLD, status);
+    float* weights = (float*)aligned_alloc(32, (incoming+(incoming%AVXLOAD))*sizeof(float));
+    initweights(weights,incoming);
+    MPI_Send(weights, incoming, MPI_FLOAT, GATHERER, 1 , MPI_COMM_WORLD);
+    free(weights);
+}
+
+void recieveSetupFeedforward(NeuralNetwork* nn)
+{
+    int index = 0;
+    int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
+    int WeightSize2;
+    int WeightHL1 = (HL1ROWS * HL1COLUMNS);
+    float* weights = (float*)aligned_alloc(32, (WeightSize)*sizeof(float));
+    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
+    for (int i = 2; i < PROCESSES; i++)
+    {
+    MPI_Recv(weights, WeightSize2, MPI_FLOAT, i, 1, MPI_COMM_WORLD,status);
+        for (int j = 0; j < WeightSize; j++)
+        {
+            if (index < WeightHL1)
+            {
+                nn->hiddenLayers[0].w[index] = weights[j];
+            }
+            else
+            {
+                nn->outputLayer[0].w[index-WeightHL1] = weights[j];
+            }
+            index++;
+        }
+    }
+    for (int i = 0; i < NODESHL1; i++)
+    {
+        nn->hiddenLayers[0].bias[i] = 0;
+    }
+    nn->outputLayer[0].bias[0] = 0;
+    free(weights);
+}
 
 
-
-NeuralNetwork initNN(int n){
+NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     NeuralNetwork nn;
-    nn.inputLayer = (float*)aligned_alloc(32, n*sizeof(float));
+    nn.inputLayer = (float*)aligned_alloc(32, InputSize*sizeof(float));
     nn.testData = (float*)aligned_alloc(32, ROWS*sizeof(float));
+    //loop this part after testing with more HL's maybe
+    nn.hiddenLayers = (Layer*)aligned_alloc(32, HLayers*sizeof(Layer));
+    nn.hiddenLayers[0].id = (int*)aligned_alloc(32,sizeof(int*));
+    nn.hiddenLayers[0].w = (float*)aligned_alloc(32, HL1W*sizeof(float));
+    nn.hiddenLayers[0].output = (float*)aligned_alloc(32, (ROWS*HL1COLUMNS)*sizeof(float));
+    nn.hiddenLayers[0].bias = (float*)aligned_alloc(32, HL1B*sizeof(float));
+
+    nn.outputLayer = (Layer*)aligned_alloc(32, sizeof(Layer));
+    nn.outputLayer[0].id = (int*)aligned_alloc(32,sizeof(int*));
+    nn.outputLayer[0].w = (float*)aligned_alloc(32,OLW*sizeof(float*));
+    nn.outputLayer[0].output = (float*)aligned_alloc(32,(ROWS*OLCOLUMNS)*sizeof(float*));
+    nn.outputLayer[0].bias = (float*)aligned_alloc(32,sizeof(float*));
+
     return nn;
 }
