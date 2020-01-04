@@ -60,7 +60,7 @@ int main(int argc, char** argv){
     MPI_Barrier(MPI_COMM_WORLD);
     if(rank == GATHERER){
      printf("scaled\n");
-     printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
+     //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
      printf("HIDDEN ID: %f", (NN.learningRate));
      for (int i = 0; i < inputsize; i++)
      {

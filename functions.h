@@ -81,6 +81,7 @@ void handleFeatureScaling(int n){
     float *data = (float*)aligned_alloc(32,sizeof(float)*AVXLOAD);
     float min,max;
     float* empty = NULL;
+    float sendSize = AVXLOAD;
         
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     //recv min and max
@@ -90,9 +91,15 @@ void handleFeatureScaling(int n){
         MPI_Recv(data, AVXLOAD, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         if(status->MPI_TAG == n) // if tag == n then its termination time
             break;
-        featureScale(data, max, min, AVXLOAD);
-        //forward scaled data to gatherer
-        MPI_Send(data, AVXLOAD, MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
+        if(status->MPI_TAG+AVXLOAD > n){
+            sendSize = n-status->MPI_TAG;//(status->MPI_TAG+AVXLOAD)-n;
+            featureScale(data, max, min, sendSize);
+        }
+        else{
+            featureScale(data, max, min, AVXLOAD);
+            sendSize = AVXLOAD;
+        }//forward scaled data to gatherer
+        MPI_Send(data, sendSize, MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
     }
     //send termination to gatherer
     MPI_Send(&empty, 1, MPI_FLOAT, GATHERER, n, MPI_COMM_WORLD);
@@ -100,33 +107,51 @@ void handleFeatureScaling(int n){
 
 //Normalizes data
 void featureScale(float *inputData, float max, float min, int n){
+    // __m256 vmax = _mm256_set1_ps(max);
+    // __m256 vmin = _mm256_set1_ps(min);
+    // __m256 diff = _mm256_sub_ps(vmax, vmin);
+    // __m256 x;
+    // for (int i = 0; i < n; i+=AVXLOAD)
+    // {
+    //     x = _mm256_load_ps(inputData+i);
+    //     x = _mm256_div_ps(_mm256_sub_ps(x, vmin), diff);
+    //     _mm256_store_ps(inputData+i, x);
+    // }
+    float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    for (int i = n; i < AVXLOAD; i++)
+    {
+        maskArr[i] = 1.0f;
+    }
+    
+    __m256i mask = _mm256_load_si256((__m256i*)maskArr); 
     __m256 vmax = _mm256_set1_ps(max);
     __m256 vmin = _mm256_set1_ps(min);
     __m256 diff = _mm256_sub_ps(vmax, vmin);
-    __m256 x;
-    for (int i = 0; i < n; i+=AVXLOAD)
-    {
-        x = _mm256_load_ps(inputData+i);
-        x = _mm256_div_ps(_mm256_sub_ps(x, vmin), diff);
-        _mm256_store_ps(inputData+i, x);
-    }
+    //__m256 x = _mm256_load_ps(inputData);
+    __m256 x = _mm256_maskload_ps(inputData, mask);
+    x = _mm256_sub_ps(x, vmin);
+    x = _mm256_div_ps(x, diff);
+    _mm256_maskstore_ps(inputData, mask, x);
+    //_mm256_store_ps(inputData, x);
+
 }
 
 //Wait for featureScaled data and read it
 void recieveFeatureScaledData(float* data, int n){
     float *incoming = (float*)aligned_alloc(32,sizeof(float)*AVXLOAD);
     int term = 0; //keep track of workers terminating
+    int count = 0;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     while (term != WORKERS)
     {
         //recv from any worker
         MPI_Recv(incoming, AVXLOAD, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        
+        MPI_Get_count(status, MPI_FLOAT, &count);
         if(status->MPI_TAG == n)
             term++;
         else{
             //store incoming data
-            for (int i = 0; i < AVXLOAD; i++)
+            for (int i = 0; i < count; i++)
             {
                 data[i+status->MPI_TAG] = incoming[i];
             }
@@ -211,16 +236,36 @@ void initweights(float* weights,int size)
     __m256 one_vec = _mm256_set1_ps(1.0f);
     __m256 twos_vec = _mm256_set1_ps(2.0f);
     __m256 RANDMAX_vec = _mm256_set1_ps(RAND_MAX);
+    __m256 rand_vector;
+    __m256i mask;
     for (int i = 0; i < size; i++)
     {
         weights[i] = (float)rand();
     }
     for (int i = 0; i < size; i+=AVXLOAD)
 	{
-        __m256 rand_vector = _mm256_div_ps(_mm256_load_ps(weights+i),RANDMAX_vec);
-        rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
-        rand_vector = _mm256_sub_ps(rand_vector,one_vec);
-        _mm256_store_ps(weights+i,rand_vector);
+        if(i+AVXLOAD >= size){
+            float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+            for (int j = size-i; j < AVXLOAD; j++)
+            {
+                maskArr[j] = 1.0f;
+            }
+            
+            mask = _mm256_load_si256((__m256i*)maskArr); 
+            rand_vector = _mm256_maskload_ps(weights+i, mask);
+            rand_vector = _mm256_div_ps(rand_vector,RANDMAX_vec);
+            rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
+            rand_vector = _mm256_sub_ps(rand_vector,one_vec);
+            //_mm256_store_ps(weights+i,rand_vector);
+            _mm256_maskstore_ps(weights+i, mask, rand_vector);
+            
+        }
+        else{
+            rand_vector = _mm256_div_ps(_mm256_load_ps(weights+i),RANDMAX_vec);
+            rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
+            rand_vector = _mm256_sub_ps(rand_vector,one_vec);
+            _mm256_store_ps(weights+i,rand_vector);
+        }
 	}
 }
 
@@ -238,7 +283,7 @@ void handleSetupFeedforward()
     int incoming;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     MPI_Recv(&incoming, 1, MPI_INT, EMITTER, 0, MPI_COMM_WORLD, status);
-    float* weights = (float*)aligned_alloc(32, (incoming+(incoming%AVXLOAD))*sizeof(float));
+    float* weights = (float*)aligned_alloc(32, (incoming/*+(incoming%AVXLOAD)*/)*sizeof(float));
     initweights(weights,incoming);
     MPI_Send(weights, incoming, MPI_FLOAT, GATHERER, 1 , MPI_COMM_WORLD);
     free(weights);
@@ -254,7 +299,7 @@ void recieveSetupFeedforward(NeuralNetwork* nn)
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     for (int i = 2; i < PROCESSES; i++)
     {
-    MPI_Recv(weights, WeightSize2, MPI_FLOAT, i, 1, MPI_COMM_WORLD,status);
+    MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD,status);
         for (int j = 0; j < WeightSize; j++)
         {
             if (index < WeightHL1)
@@ -283,16 +328,16 @@ NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     nn.testData = (float*)aligned_alloc(32, ROWS*sizeof(float));
     //loop this part after testing with more HL's maybe
     nn.hiddenLayers = (Layer*)aligned_alloc(32, HLayers*sizeof(Layer));
-    nn.hiddenLayers[0].id = (int*)aligned_alloc(32,sizeof(int*));
+    nn.hiddenLayers[0].id = (int*)aligned_alloc(32,sizeof(int));
     nn.hiddenLayers[0].w = (float*)aligned_alloc(32, HL1W*sizeof(float));
     nn.hiddenLayers[0].output = (float*)aligned_alloc(32, (ROWS*HL1COLUMNS)*sizeof(float));
     nn.hiddenLayers[0].bias = (float*)aligned_alloc(32, HL1B*sizeof(float));
 
     nn.outputLayer = (Layer*)aligned_alloc(32, sizeof(Layer));
-    nn.outputLayer[0].id = (int*)aligned_alloc(32,sizeof(int*));
-    nn.outputLayer[0].w = (float*)aligned_alloc(32,OLW*sizeof(float*));
-    nn.outputLayer[0].output = (float*)aligned_alloc(32,(ROWS*OLCOLUMNS)*sizeof(float*));
-    nn.outputLayer[0].bias = (float*)aligned_alloc(32,sizeof(float*));
+    nn.outputLayer[0].id = (int*)aligned_alloc(32,sizeof(int));
+    nn.outputLayer[0].w = (float*)aligned_alloc(32,OLW*sizeof(float));
+    nn.outputLayer[0].output = (float*)aligned_alloc(32,(ROWS*OLCOLUMNS)*sizeof(float));
+    nn.outputLayer[0].bias = (float*)aligned_alloc(32,sizeof(float));
 
     return nn;
 }
