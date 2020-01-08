@@ -21,6 +21,11 @@ void initweights(float* weights);
 void featureScale(float *inputData, float max, float min, int n);
 void handleFeatureScaling(int n);
 void recieveFeatureScaledData(float* data, int n);
+void feedforward(NeuralNetwork* nn);
+void handleFeedforward();
+void calcOutput(float* inputSlice, float* weights, float* bias, float* output);
+void reciveFeedforward(NeuralNetwork* nn);
+
 void readInputData(char* textfile, float* data, float* correctRes);
 float _mm256_find_max(__m256 vector);
 float _mm256_find_min(__m256 vector);
@@ -49,10 +54,9 @@ float sigmoid(float x, int derivate){
 //Reads data, finds min/max and forwards data to workers
 void setupFeatureScaling(float *data, float* testData, int n){
     float max = 0.0f, min = 20000.0f;
-    readInputData((char*)"data.txt", data, testData);
+    readInputData((char*)"testdata.txt", data, testData);
     find_min_max(data, ROWS, COLUMNS-1, &max, &min);
     float *empty = NULL;
-
     //send min/max to workers
     for (int i = 2; i < PROCESSES; i++)
     {
@@ -175,9 +179,9 @@ void readInputData(char* textfile, float* data, float* correctRes){
         int lastChar = 0;
         int i=0, j=0;
         while (fgets(str, 200, fp) != NULL){
-            lastChar = strlen(str)-3;
+            lastChar = strlen(str)-5;//-3 in real data -5 test
             temp = str;
-            correctRes[j] = float(strtod(&str[lastChar], NULL));
+            correctRes[j] = float(strtod(str+lastChar, NULL));
             j++;
             temp[lastChar] = '\0';
             while(*temp != '\0'){
@@ -231,6 +235,7 @@ void find_min_max(float* data, int rows, int columns, float* max, float* min){
     *max = _mm256_find_max(max_vector);
     *min = _mm256_find_min(min_vector);
 }
+
 void initweights(float* weights,int size)
 {
     __m256 one_vec = _mm256_set1_ps(1.0f);
@@ -299,7 +304,7 @@ void recieveSetupFeedforward(NeuralNetwork* nn)
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     for (int i = 2; i < PROCESSES; i++)
     {
-    MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD,status);
+    MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD, status);
         for (int j = 0; j < WeightSize; j++)
         {
             if (index < WeightHL1)
@@ -321,12 +326,86 @@ void recieveSetupFeedforward(NeuralNetwork* nn)
     free(weights);
 }
 
+void feedforward(NeuralNetwork* nn){
+    float* empty = NULL;
+    for (int i = 2; i < PROCESSES; i++)
+    {
+        MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
+    }   
+    for (int i = 0; i < ROWS; i++)
+    {
+        MPI_Send(nn->inputLayer+(i * HL1ROWS), HL1ROWS, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
+    }   
+    for (int i = 2; i < PROCESSES; i++)
+    {
+        MPI_Send(&empty, 1, MPI_FLOAT, i, ROWS, MPI_COMM_WORLD);
+    }
+}
+
+void handleFeedforward(){
+    float* inputSlice = (float*)aligned_alloc(32, HL1ROWS*sizeof(float));
+    float* weights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
+    float* bias = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* empty = NULL;
+    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
+
+    MPI_Recv(weights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    MPI_Recv(bias, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+
+ 
+    while(true){    
+        MPI_Recv(inputSlice, HL1ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        for (int i = 0; i < NODESHL1; i++)
+        {
+            output[i] = 0.0;
+        }
+        if (status->MPI_TAG == ROWS)
+            break;
+        
+        calcOutput(inputSlice,weights,bias,output);
+        MPI_Send(output, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
+        output[0] = 0.0;
+        output[1] = 0.0;
+    }
+    MPI_Send(&empty, 1, MPI_FLOAT, EMITTER, ROWS, MPI_COMM_WORLD);
+}
+
+void reciveFeedforward(NeuralNetwork* nn){
+    float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
+    int term = 0; 
+    while(term != WORKERS){    
+        MPI_Recv(output, NODESHL1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        if(status->MPI_TAG == ROWS)
+            term++;
+        else{
+            for (int i = 0; i < NODESHL1; i++)
+            {
+                nn->hiddenLayers[0].output[(status->MPI_TAG*NODESHL1)+i] = output[i];
+            }
+        }
+    }
+}
+
+void calcOutput(float* inputSlice, float* weights,float* bias,float* output){
+    for (int j = 0; j < NODESHL1; j++)
+    {
+        for (int i = 0; i < HL1ROWS; i++)
+        {
+            output[j] += weights[(i*NODESHL1)+j]*inputSlice[i];
+        }
+        output[j] += bias[j];
+        output[j] = sigmoid(output[j], 0);
+    }
+}
 
 NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     NeuralNetwork nn;
     nn.inputLayer = (float*)aligned_alloc(32, InputSize*sizeof(float));
     nn.testData = (float*)aligned_alloc(32, ROWS*sizeof(float));
-    //loop this part after testing with more HL's maybe
+    
     nn.hiddenLayers = (Layer*)aligned_alloc(32, HLayers*sizeof(Layer));
     nn.hiddenLayers[0].id = (int*)aligned_alloc(32,sizeof(int));
     nn.hiddenLayers[0].w = (float*)aligned_alloc(32, HL1W*sizeof(float));

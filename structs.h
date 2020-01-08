@@ -26,13 +26,13 @@ struct NeuralNetwork{
 #define WORKERS 2
 #define PROCESSES 4
 //nodes in hiddenlayers
-#define NODESHL1 7
+#define NODESHL1 2
 //#define NODESHL2 2
 //inputLayer
-#define ROWS 1151
-#define COLUMNS 20
-//#define ROWS 4 //testing NN
-//#define COLUMNS 4
+//#define ROWS 1151
+//#define COLUMNS 20
+#define ROWS 4 //testing NN
+#define COLUMNS 4
 //HiddenLayer1
 #define HL1ROWS (COLUMNS-1)
 #define HL1COLUMNS NODESHL1
