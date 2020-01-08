@@ -23,8 +23,10 @@ void handleFeatureScaling(int n);
 void recieveFeatureScaledData(float* data, int n);
 void feedforward(NeuralNetwork* nn);
 void handleFeedforward();
-void calcOutput(float* inputSlice, float* weights, float* bias, float* output);
+void calcOutput(float* inputSlice, float* weights, float* bias, float* output, int col, int row);
 void reciveFeedforward(NeuralNetwork* nn);
+void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter);
+
 
 void readInputData(char* textfile, float* data, float* correctRes);
 float _mm256_find_max(__m256 vector);
@@ -332,6 +334,8 @@ void feedforward(NeuralNetwork* nn){
     {
         MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
         MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
     }   
     for (int i = 0; i < ROWS; i++)
     {
@@ -347,54 +351,84 @@ void handleFeedforward(){
     float* inputSlice = (float*)aligned_alloc(32, HL1ROWS*sizeof(float));
     float* weights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
     float* bias = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
-    float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* OLweights = (float*)aligned_alloc(32, (OLROWS*OLCOLUMNS)*sizeof(float));
+    float* OLbias = (float*)aligned_alloc(32, sizeof(float));
+    float* HLoutput = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* OLoutput = (float*)aligned_alloc(32, sizeof(float));
     float* empty = NULL;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
 
     MPI_Recv(weights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(bias, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    MPI_Recv(OLbias, 1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
 
  
     while(true){    
         MPI_Recv(inputSlice, HL1ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         for (int i = 0; i < NODESHL1; i++)
         {
-            output[i] = 0.0;
+            HLoutput[i] = 0.0;
         }
+        OLoutput[0] = 0.0;
         if (status->MPI_TAG == ROWS)
             break;
         
-        calcOutput(inputSlice,weights,bias,output);
-        MPI_Send(output, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
-        output[0] = 0.0;
-        output[1] = 0.0;
+        calcOutput(inputSlice,weights,bias,HLoutput,NODESHL1,HL1ROWS);
+        calcOL(HLoutput,OLweights,OLbias,OLoutput,OLROWS);
+        MPI_Send(HLoutput, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
+        MPI_Send(OLoutput, 1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
     }
     MPI_Send(&empty, 1, MPI_FLOAT, EMITTER, ROWS, MPI_COMM_WORLD);
 }
 
+void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter){ 
+    for (int i = 0; i < iter; i++)
+    {
+        output[0] += weights[i]*inputSlice[i];
+    }
+    output[0] += bias[0];
+    output[0] = sigmoid(output[0], 0);
+}
+
 void reciveFeedforward(NeuralNetwork* nn){
     float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* OLoutput = (float*)aligned_alloc(32, sizeof(float));
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     int term = 0; 
-    while(term != WORKERS){    
+    while(term != WORKERS){  
         MPI_Recv(output, NODESHL1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        //printf("source: %d\n", status->MPI_SOURCE);  
+        //MPI_Recv(OLoutput, 1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         if(status->MPI_TAG == ROWS)
             term++;
         else{
-            for (int i = 0; i < NODESHL1; i++)
-            {
-                nn->hiddenLayers[0].output[(status->MPI_TAG*NODESHL1)+i] = output[i];
+            //printf("%d\n", (int)status->_ucount);
+            if(status->_ucount > 4){
+                for (int i = 0; i < NODESHL1; i++)
+                {
+                    nn->hiddenLayers[0].output[(status->MPI_TAG*NODESHL1)+i] = output[i];
+                }
+            }
+            else{
+                nn->outputLayer[0].output[status->MPI_TAG] = output[0];
+                printf("%f\n", output[0]);
             }
         }
     }
+   
+    
+    //printData(nn->hiddenLayers[0].output, ROWS,HL1COLUMNS);
 }
 
-void calcOutput(float* inputSlice, float* weights,float* bias,float* output){
-    for (int j = 0; j < NODESHL1; j++)
+
+
+void calcOutput(float* inputSlice, float* weights, float* bias, float* output, int col, int row){
+    for (int j = 0; j < col; j++)
     {
-        for (int i = 0; i < HL1ROWS; i++)
+        for (int i = 0; i < row; i++)
         {
-            output[j] += weights[(i*NODESHL1)+j]*inputSlice[i];
+            output[j] += weights[(i*col)+j]*inputSlice[i];
         }
         output[j] += bias[j];
         output[j] = sigmoid(output[j], 0);
