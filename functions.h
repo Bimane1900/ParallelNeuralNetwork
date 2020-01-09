@@ -6,33 +6,24 @@
 #include <immintrin.h>
 #include <mpi.h>
 #include "stdlib.h"
-#include "structs.h"
 #include "stdio.h"
 #include "string.h"
 //#include "FF.c"
 
+#include "structs.h"
+
 void printData(float* data, int rows, int columns);
-float sigmoid(float x, int derivate);
-void setupFeatureScaling(float *data, float* testData, int n);
-void setupFeedforward();
-void handleSetupFeedforward();
-void recieveSetupFeedforward(NeuralNetwork* nn);
-void initweights(float* weights);
-void featureScale(float *inputData, float max, float min, int n);
-void handleFeatureScaling(int n);
-void recieveFeatureScaledData(float* data, int n);
-void feedforward(NeuralNetwork* nn);
-void handleFeedforward();
-void calcOutput(float* inputSlice, float* weights, float* bias, float* output, int col, int row);
-void reciveFeedforward(NeuralNetwork* nn);
-void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter);
-
-
 void readInputData(char* textfile, float* data, float* correctRes);
+NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW);
+void freeNN(NeuralNetwork NN);
 float _mm256_find_max(__m256 vector);
 float _mm256_find_min(__m256 vector);
 void find_min_max(float* data, int rows, int columns, float* max, float* min);
-NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW);
+__m256i getAVXVectorMask(int start);
+
+
+#include "featurescaling.h"
+#include "feedforward.h"
 
 void printData(float* data, int rows, int columns){
     for (int i = 0; i < rows; i++)
@@ -47,125 +38,7 @@ void printData(float* data, int rows, int columns){
     
 }
 
-float sigmoid(float x, int derivate){
-    if(derivate)
-        return x*(1-x);
-    return 1/(1+expf(-x));
-}
 
-//Reads data, finds min/max and forwards data to workers
-void setupFeatureScaling(float *data, float* testData, int n){
-    float max = 0.0f, min = 20000.0f;
-    readInputData((char*)"testdata.txt", data, testData);
-    find_min_max(data, ROWS, COLUMNS-1, &max, &min);
-    float *empty = NULL;
-    //send min/max to workers
-    for (int i = 2; i < PROCESSES; i++)
-    {
-        MPI_Send(&min, 1, MPI_FLOAT, i, n, MPI_COMM_WORLD);
-        MPI_Send(&max, 1, MPI_FLOAT, i, n, MPI_COMM_WORLD);
-    }
-
-    //send data
-    int sendTo = 0;
-    for (int i = 0; i < n; i+=AVXLOAD)
-    {
-        MPI_Send(data+i, AVXLOAD, MPI_FLOAT, (sendTo%WORKERS)+2, i, MPI_COMM_WORLD);
-        sendTo++;
-        
-    }
-
-    //send termination
-    for (int i = 2; i < PROCESSES; i++)
-    {
-        MPI_Send(&empty, 1, MPI_FLOAT, i, n, MPI_COMM_WORLD);
-    }
-}
-
-//Recieves data, featureScales it and forwards to a reciever
-void handleFeatureScaling(int n){
-    float *data = (float*)aligned_alloc(32,sizeof(float)*AVXLOAD);
-    float min,max;
-    float* empty = NULL;
-    float sendSize = AVXLOAD;
-        
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    //recv min and max
-    MPI_Recv(&min, 1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(&max, 1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    while(true){
-        MPI_Recv(data, AVXLOAD, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        if(status->MPI_TAG == n) // if tag == n then its termination time
-            break;
-        if(status->MPI_TAG+AVXLOAD > n){
-            sendSize = n-status->MPI_TAG;//(status->MPI_TAG+AVXLOAD)-n;
-            featureScale(data, max, min, sendSize);
-        }
-        else{
-            featureScale(data, max, min, AVXLOAD);
-            sendSize = AVXLOAD;
-        }//forward scaled data to gatherer
-        MPI_Send(data, sendSize, MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
-    }
-    //send termination to gatherer
-    MPI_Send(&empty, 1, MPI_FLOAT, GATHERER, n, MPI_COMM_WORLD);
-}
-
-//Normalizes data
-void featureScale(float *inputData, float max, float min, int n){
-    // __m256 vmax = _mm256_set1_ps(max);
-    // __m256 vmin = _mm256_set1_ps(min);
-    // __m256 diff = _mm256_sub_ps(vmax, vmin);
-    // __m256 x;
-    // for (int i = 0; i < n; i+=AVXLOAD)
-    // {
-    //     x = _mm256_load_ps(inputData+i);
-    //     x = _mm256_div_ps(_mm256_sub_ps(x, vmin), diff);
-    //     _mm256_store_ps(inputData+i, x);
-    // }
-    float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
-    for (int i = n; i < AVXLOAD; i++)
-    {
-        maskArr[i] = 1.0f;
-    }
-    
-    __m256i mask = _mm256_load_si256((__m256i*)maskArr); 
-    __m256 vmax = _mm256_set1_ps(max);
-    __m256 vmin = _mm256_set1_ps(min);
-    __m256 diff = _mm256_sub_ps(vmax, vmin);
-    //__m256 x = _mm256_load_ps(inputData);
-    __m256 x = _mm256_maskload_ps(inputData, mask);
-    x = _mm256_sub_ps(x, vmin);
-    x = _mm256_div_ps(x, diff);
-    _mm256_maskstore_ps(inputData, mask, x);
-    //_mm256_store_ps(inputData, x);
-
-}
-
-//Wait for featureScaled data and read it
-void recieveFeatureScaledData(float* data, int n){
-    float *incoming = (float*)aligned_alloc(32,sizeof(float)*AVXLOAD);
-    int term = 0; //keep track of workers terminating
-    int count = 0;
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    while (term != WORKERS)
-    {
-        //recv from any worker
-        MPI_Recv(incoming, AVXLOAD, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        MPI_Get_count(status, MPI_FLOAT, &count);
-        if(status->MPI_TAG == n)
-            term++;
-        else{
-            //store incoming data
-            for (int i = 0; i < count; i++)
-            {
-                data[i+status->MPI_TAG] = incoming[i];
-            }
-        }
-
-    }
-    free(incoming);
-}
 
 //Reads data from file and stores in float arrays
 void readInputData(char* textfile, float* data, float* correctRes){
@@ -200,6 +73,7 @@ void readInputData(char* textfile, float* data, float* correctRes){
     fp = NULL;
     temp = NULL;
 }
+
 
 //Finds max float in a AVX vector
 float _mm256_find_max(__m256 vector){
@@ -238,202 +112,17 @@ void find_min_max(float* data, int rows, int columns, float* max, float* min){
     *min = _mm256_find_min(min_vector);
 }
 
-void initweights(float* weights,int size)
-{
-    __m256 one_vec = _mm256_set1_ps(1.0f);
-    __m256 twos_vec = _mm256_set1_ps(2.0f);
-    __m256 RANDMAX_vec = _mm256_set1_ps(RAND_MAX);
-    __m256 rand_vector;
+__m256i getAVXVectorMask(int start){
     __m256i mask;
-    for (int i = 0; i < size; i++)
+    float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {
+        -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    for (int i = start; i < AVXLOAD; i++)
     {
-        weights[i] = (float)rand();
+        maskArr[i] = 1.0f;
     }
-    for (int i = 0; i < size; i+=AVXLOAD)
-	{
-        if(i+AVXLOAD >= size){
-            float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
-            for (int j = size-i; j < AVXLOAD; j++)
-            {
-                maskArr[j] = 1.0f;
-            }
-            
-            mask = _mm256_load_si256((__m256i*)maskArr); 
-            rand_vector = _mm256_maskload_ps(weights+i, mask);
-            rand_vector = _mm256_div_ps(rand_vector,RANDMAX_vec);
-            rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
-            rand_vector = _mm256_sub_ps(rand_vector,one_vec);
-            //_mm256_store_ps(weights+i,rand_vector);
-            _mm256_maskstore_ps(weights+i, mask, rand_vector);
-            
-        }
-        else{
-            rand_vector = _mm256_div_ps(_mm256_load_ps(weights+i),RANDMAX_vec);
-            rand_vector = _mm256_mul_ps(rand_vector,twos_vec);
-            rand_vector = _mm256_sub_ps(rand_vector,one_vec);
-            _mm256_store_ps(weights+i,rand_vector);
-        }
-	}
-}
-
-void setupFeedforward()
-{
-    int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
-    for (int i = 2; i < PROCESSES; i++)
-    {
-        MPI_Send(&WeightSize, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-    }     
-}
-
-void handleSetupFeedforward()
-{
-    int incoming;
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    MPI_Recv(&incoming, 1, MPI_INT, EMITTER, 0, MPI_COMM_WORLD, status);
-    float* weights = (float*)aligned_alloc(32, (incoming/*+(incoming%AVXLOAD)*/)*sizeof(float));
-    initweights(weights,incoming);
-    MPI_Send(weights, incoming, MPI_FLOAT, GATHERER, 1 , MPI_COMM_WORLD);
-    free(weights);
-}
-
-void recieveSetupFeedforward(NeuralNetwork* nn)
-{
-    int index = 0;
-    int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
-    int WeightSize2;
-    int WeightHL1 = (HL1ROWS * HL1COLUMNS);
-    float* weights = (float*)aligned_alloc(32, (WeightSize)*sizeof(float));
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    for (int i = 2; i < PROCESSES; i++)
-    {
-    MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD, status);
-        for (int j = 0; j < WeightSize; j++)
-        {
-            if (index < WeightHL1)
-            {
-                nn->hiddenLayers[0].w[index] = weights[j];
-            }
-            else
-            {
-                nn->outputLayer[0].w[index-WeightHL1] = weights[j];
-            }
-            index++;
-        }
-    }
-    for (int i = 0; i < NODESHL1; i++)
-    {
-        nn->hiddenLayers[0].bias[i] = 0;
-    }
-    nn->outputLayer[0].bias[0] = 0;
-    free(weights);
-}
-
-void feedforward(NeuralNetwork* nn){
-    float* empty = NULL;
-    for (int i = 2; i < PROCESSES; i++)
-    {
-        MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
-    }   
-    for (int i = 0; i < ROWS; i++)
-    {
-        MPI_Send(nn->inputLayer+(i * HL1ROWS), HL1ROWS, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
-    }   
-    for (int i = 2; i < PROCESSES; i++)
-    {
-        MPI_Send(&empty, 1, MPI_FLOAT, i, ROWS, MPI_COMM_WORLD);
-    }
-}
-
-void handleFeedforward(){
-    float* inputSlice = (float*)aligned_alloc(32, HL1ROWS*sizeof(float));
-    float* weights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
-    float* bias = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
-    float* OLweights = (float*)aligned_alloc(32, (OLROWS*OLCOLUMNS)*sizeof(float));
-    float* OLbias = (float*)aligned_alloc(32, sizeof(float));
-    float* HLoutput = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
-    float* OLoutput = (float*)aligned_alloc(32, sizeof(float));
-    float* empty = NULL;
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-
-    MPI_Recv(weights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(bias, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(OLbias, 1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-
- 
-    while(true){    
-        MPI_Recv(inputSlice, HL1ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        for (int i = 0; i < NODESHL1; i++)
-        {
-            HLoutput[i] = 0.0;
-        }
-        OLoutput[0] = 0.0;
-        if (status->MPI_TAG == ROWS)
-            break;
-        
-        calcOutput(inputSlice,weights,bias,HLoutput,NODESHL1,HL1ROWS);
-        calcOL(HLoutput,OLweights,OLbias,OLoutput,OLROWS);
-        MPI_Send(HLoutput, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
-        MPI_Send(OLoutput, 1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
-    }
-    MPI_Send(&empty, 1, MPI_FLOAT, EMITTER, ROWS, MPI_COMM_WORLD);
-}
-
-void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter){ 
-    for (int i = 0; i < iter; i++)
-    {
-        output[0] += weights[i]*inputSlice[i];
-    }
-    output[0] += bias[0];
-    output[0] = sigmoid(output[0], 0);
-}
-
-void reciveFeedforward(NeuralNetwork* nn){
-    float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
-    float* OLoutput = (float*)aligned_alloc(32, sizeof(float));
-    MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    int term = 0; 
-    while(term != WORKERS){  
-        MPI_Recv(output, NODESHL1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        //printf("source: %d\n", status->MPI_SOURCE);  
-        //MPI_Recv(OLoutput, 1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        if(status->MPI_TAG == ROWS)
-            term++;
-        else{
-            //printf("%d\n", (int)status->_ucount);
-            if(status->_ucount > 4){
-                for (int i = 0; i < NODESHL1; i++)
-                {
-                    nn->hiddenLayers[0].output[(status->MPI_TAG*NODESHL1)+i] = output[i];
-                }
-            }
-            else{
-                nn->outputLayer[0].output[status->MPI_TAG] = output[0];
-                printf("%f\n", output[0]);
-            }
-        }
-    }
-   
-    
-    //printData(nn->hiddenLayers[0].output, ROWS,HL1COLUMNS);
-}
-
-
-
-void calcOutput(float* inputSlice, float* weights, float* bias, float* output, int col, int row){
-    for (int j = 0; j < col; j++)
-    {
-        for (int i = 0; i < row; i++)
-        {
-            output[j] += weights[(i*col)+j]*inputSlice[i];
-        }
-        output[j] += bias[j];
-        output[j] = sigmoid(output[j], 0);
-    }
-}
+    mask = _mm256_load_si256((__m256i*)maskArr); 
+    return mask;
+} 
 
 NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     NeuralNetwork nn;
@@ -453,4 +142,21 @@ NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     nn.outputLayer[0].bias = (float*)aligned_alloc(32,sizeof(float));
 
     return nn;
+}
+
+void freeNN(NeuralNetwork nn){
+    free(nn.inputLayer);
+    free(nn.testData);
+    
+    free(nn.hiddenLayers);
+    free(nn.hiddenLayers[0].id);
+    free(nn.hiddenLayers[0].w);
+    free(nn.hiddenLayers[0].output);
+    free(nn.hiddenLayers[0].bias);
+
+    free(nn.outputLayer);
+    free(nn.outputLayer[0].id);
+    free(nn.outputLayer[0].w);
+    free(nn.outputLayer[0].output);
+    free(nn.outputLayer[0].bias);
 }

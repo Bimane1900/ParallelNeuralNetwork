@@ -80,15 +80,19 @@ int main(int argc, char** argv){
     //      if((NN.inputLayer[i]) == 1.0f)
     //         printf("\none: %f",(NN.inputLayer[i]));
     //  }
+        freeNN(NN);
     }
      if(rank == EMITTER){
         printf("EMITTER\n");
+        //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
         printData(NN.outputLayer[0].output, 4, 1);
         // for (int i = 0; i < 4; i++)
         // {    
         //     printf("\none: %f",(NN.testData[i]));
-        // } 
+        // }
+        freeNN(NN); 
     }
+    
     MPI_Finalize();
     
     return 0;
