@@ -51,6 +51,8 @@ int main(int argc, char** argv){
     //while(epoch){
         if(rank == EMITTER){
            reciveFeedforward(&NN);
+           //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
+           //printData(NN.outputLayer[0].output, ROWS, OLCOLUMNS);
         }
         else if (rank == GATHERER){
             feedforward(&NN);
@@ -61,13 +63,14 @@ int main(int argc, char** argv){
         MPI_Barrier(MPI_COMM_WORLD);
     //    --epoch;
         if(rank == EMITTER){
-            //backprop
+            setupBackProp(&NN);
         }
         else if (rank == GATHERER){
+            recieveBackProp(&NN);
             //recive backrop, assign Weights
         }
         else{
-            //handle backprop
+            handleBackProp();
         }
         MPI_Barrier(MPI_COMM_WORLD);
     //}
@@ -87,7 +90,7 @@ int main(int argc, char** argv){
      if(rank == EMITTER){
         printf("EMITTER\n");
         //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
-        printData(NN.outputLayer[0].output, ROWS, OLCOLUMNS);
+        //printData(NN.outputLayer[0].output, ROWS, OLCOLUMNS);
         // for (int i = 0; i < 4; i++)
         // {    
         //     printf("\none: %f",(NN.testData[i]));

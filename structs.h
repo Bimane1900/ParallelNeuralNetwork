@@ -26,7 +26,7 @@ struct NeuralNetwork{
 #define WORKERS 2
 #define PROCESSES 4
 //nodes in hiddenlayers
-#define NODESHL1 4
+#define NODESHL1 10
 //#define NODESHL2 2
 //inputLayer
 //#define ROWS 1151
