@@ -24,7 +24,8 @@ int main(int argc, char** argv){
     int OLWeights = OLROWS*OLCOLUMNS;
     if(rank == EMITTER){
         NN = initNN(hiddenlayers,inputsize,HL1Weights,HL1Bias,OLWeights);
-        setupFeatureScaling(NN.inputLayer, NN.testData, inputsize);
+        readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
+        setupFeatureScaling(NN.inputLayer, inputsize);
     }
     else if (rank == GATHERER){
         NN = initNN(hiddenlayers,inputsize,HL1Weights,HL1Bias,OLWeights);
@@ -59,21 +60,22 @@ int main(int argc, char** argv){
         }
         MPI_Barrier(MPI_COMM_WORLD);
     //    --epoch;
-    //     if(rank == EMITTER){
-    //         //backprop
-    //     }
-    //     else if (rank == GATHERER){
-    //         //recive backrop, assign Weights
-    //     }
-    //     else{
-    //         //handle backprop
-    //     }
-    //     MPI_Barrier(MPI_COMM_WORLD);
+        if(rank == EMITTER){
+            //backprop
+        }
+        else if (rank == GATHERER){
+            //recive backrop, assign Weights
+        }
+        else{
+            //handle backprop
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
     //}
     if(rank == GATHERER){
      //printf("GATHERER\n");
      //printData(NN.inputLayer, ROWS, HL1ROWS);
      //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
+     
      //printf("HIDDEN ID: %f", (NN.learningRate));
     //  for (int i = 0; i < inputsize; i++)
     //  {
@@ -85,7 +87,7 @@ int main(int argc, char** argv){
      if(rank == EMITTER){
         printf("EMITTER\n");
         //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
-        printData(NN.outputLayer[0].output, 4, 1);
+        printData(NN.outputLayer[0].output, ROWS, OLCOLUMNS);
         // for (int i = 0; i < 4; i++)
         // {    
         //     printf("\none: %f",(NN.testData[i]));

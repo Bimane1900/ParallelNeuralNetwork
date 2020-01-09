@@ -51,14 +51,17 @@ void readInputData(char* textfile, float* data, float* correctRes){
         printf("Could not open file %s",textfile);
     }
     else{
-        int lastChar = 0;
+        int lastCharInd = 0;
         int i=0, j=0;
         while (fgets(str, 200, fp) != NULL){
-            lastChar = strlen(str)-5;//-3 in real data -5 test
+            lastCharInd = strlen(str)-LAST_CHAR_OFFSET;//-3 in real data -5 test
             temp = str;
-            correctRes[j] = float(strtod(str+lastChar, NULL));
+            //correctRes should have last digit per row, which is testing data
+            correctRes[j] = float(strtod(str+lastCharInd, NULL));
             j++;
-            temp[lastChar] = '\0';
+            //moves end of line to not read test data into actual data
+            temp[lastCharInd] = '\0';
+            //reads every digit on a line 
             while(*temp != '\0'){
                 data[i] = (float)strtod(temp, &temp);
                 i++;
@@ -101,17 +104,21 @@ float _mm256_find_min(__m256 vector){
 void find_min_max(float* data, int rows, int columns, float* max, float* min){
 	__m256 min_vector = _mm256_set1_ps(*min);
 	__m256 max_vector = _mm256_set1_ps(*max);
+    __m256i mask;
 	//forloop sets vector with 8 minimum/maximum floats
 	for (int i = AVXLOAD; i < rows*columns; i+=AVXLOAD)
 	{
-        max_vector = _mm256_max_ps(max_vector, _mm256_load_ps(data+i));
-		min_vector = _mm256_min_ps(min_vector, _mm256_load_ps(data+i));
+        mask = getAVXVectorMask(rows*columns-i);
+        max_vector = _mm256_max_ps(max_vector, _mm256_maskload_ps(data+i,mask));
+		min_vector = _mm256_min_ps(min_vector, _mm256_maskload_ps(data+i,mask));
 	}
 	//extract min/max with declared functions
     *max = _mm256_find_max(max_vector);
     *min = _mm256_find_min(min_vector);
 }
 
+//gets a mask for use in maskload or maskstore
+//indices between start -> AVXLOAD(8) will be masked
 __m256i getAVXVectorMask(int start){
     __m256i mask;
     float maskArr[AVXLOAD] __attribute__ ((aligned (32))) = {
@@ -145,18 +152,20 @@ NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
 }
 
 void freeNN(NeuralNetwork nn){
+
     free(nn.inputLayer);
     free(nn.testData);
     
-    free(nn.hiddenLayers);
     free(nn.hiddenLayers[0].id);
     free(nn.hiddenLayers[0].w);
     free(nn.hiddenLayers[0].output);
     free(nn.hiddenLayers[0].bias);
+    free(nn.hiddenLayers);
+    
 
-    free(nn.outputLayer);
     free(nn.outputLayer[0].id);
     free(nn.outputLayer[0].w);
     free(nn.outputLayer[0].output);
     free(nn.outputLayer[0].bias);
+    free(nn.outputLayer);
 }

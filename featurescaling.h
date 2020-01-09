@@ -1,13 +1,12 @@
 
-void setupFeatureScaling(float *data, float* testData, int n);
+void setupFeatureScaling(float *data, int n);
 void featureScale(float *inputData, float max, float min, int n);
 void handleFeatureScaling(int n);
 void recieveFeatureScaledData(float* data, int n);
 
 //Reads data, finds min/max and forwards data to workers
-void setupFeatureScaling(float *data, float* testData, int n){
+void setupFeatureScaling(float *data, int n){
     float max = 0.0f, min = 20000.0f;
-    readInputData((char*)"testdata.txt", data, testData);
     find_min_max(data, ROWS, COLUMNS-1, &max, &min);
     float *empty = NULL;
     //send min/max to workers
@@ -17,7 +16,7 @@ void setupFeatureScaling(float *data, float* testData, int n){
         MPI_Send(&max, 1, MPI_FLOAT, i, n, MPI_COMM_WORLD);
     }
 
-    //send data
+    //send data in chunks of 8 floats
     int sendTo = 0;
     for (int i = 0; i < n; i+=AVXLOAD)
     {
@@ -48,14 +47,16 @@ void handleFeatureScaling(int n){
         MPI_Recv(data, AVXLOAD, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         if(status->MPI_TAG == n) // if tag == n then its termination time
             break;
+        //if we are about to overshoot AVXLOAD-size, we adjust sendSize
         if(status->MPI_TAG+AVXLOAD > n){
-            sendSize = n-status->MPI_TAG;//(status->MPI_TAG+AVXLOAD)-n;
+            sendSize = n-status->MPI_TAG;
             featureScale(data, max, min, sendSize);
         }
         else{
             featureScale(data, max, min, AVXLOAD);
             sendSize = AVXLOAD;
-        }//forward scaled data to gatherer
+        }
+        //forward scaled data to gatherer
         MPI_Send(data, sendSize, MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
     }
     //send termination to gatherer
@@ -66,7 +67,8 @@ void handleFeatureScaling(int n){
 
 //Normalizes data
 void featureScale(float *inputData, float max, float min, int n){
-    __m256i mask = getAVXVectorMask(n); 
+    //mask incase n != AVX vector size
+    __m256i mask = getAVXVectorMask(n);
     __m256 vmax = _mm256_set1_ps(max);
     __m256 vmin = _mm256_set1_ps(min);
     __m256 diff = _mm256_sub_ps(vmax, vmin);
@@ -87,6 +89,7 @@ void recieveFeatureScaledData(float* data, int n){
     {
         //recv from any worker
         MPI_Recv(incoming, AVXLOAD, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        //get the count of recv data incase total data size is not multiple of AVXLOAD(8)
         MPI_Get_count(status, MPI_FLOAT, &count);
         if(status->MPI_TAG == n)
             term++;
@@ -94,6 +97,7 @@ void recieveFeatureScaledData(float* data, int n){
             //store incoming data
             for (int i = 0; i < count; i++)
             {
+                //tag is used to indicate index thoughout the message passing
                 data[i+status->MPI_TAG] = incoming[i];
             }
         }

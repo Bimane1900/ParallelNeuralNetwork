@@ -11,14 +11,14 @@ void reciveFeedforward(NeuralNetwork* nn);
 void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter);
 void calcOutputAVX(float* inputSlice, float* weights, float* bias, float* output, int col, int row);
 
-
+//neural network activation function
 float sigmoid(float x, int derivate){
     if(derivate)
         return x*(1-x);
     return 1/(1+expf(-x));
 }
 
-
+//sets the inital weights to be used in feedforward
 void initweights(float* weights,int size)
 {
     __m256 one_vec = _mm256_set1_ps(1.0f);
@@ -28,10 +28,12 @@ void initweights(float* weights,int size)
     __m256i mask;
     for (int i = 0; i < size; i++)
     {
+        //sequential randomize
         weights[i] = (float)rand();
     }
     for (int i = 0; i < size; i+=AVXLOAD)
 	{
+        //use masking incase size is not multiple of AVXLOAD(8)
         mask = getAVXVectorMask(size-i); 
         rand_vector = _mm256_maskload_ps(weights+i, mask);
         rand_vector = _mm256_div_ps(rand_vector,RANDMAX_vec);
@@ -41,6 +43,7 @@ void initweights(float* weights,int size)
 	}
 }
 
+//signals the workers to start calculations
 void setupFeedforward()
 {
     int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
@@ -50,31 +53,38 @@ void setupFeedforward()
     }     
 }
 
+//sets up initial values that are need before feedforward can begin
 void handleSetupFeedforward()
 {
-    int incoming;
+    int nWeights;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    MPI_Recv(&incoming, 1, MPI_INT, EMITTER, 0, MPI_COMM_WORLD, status);
-    float* weights = (float*)aligned_alloc(32, (incoming/*+(incoming%AVXLOAD)*/)*sizeof(float));
-    initweights(weights,incoming);
-    MPI_Send(weights, incoming, MPI_FLOAT, GATHERER, 1 , MPI_COMM_WORLD);
+    MPI_Recv(&nWeights, 1, MPI_INT, EMITTER, 0, MPI_COMM_WORLD, status);
+    float* weights = (float*)aligned_alloc(32, (nWeights)*sizeof(float));
+    initweights(weights,nWeights);
+    //forwards initiated weights to gatherer
+    MPI_Send(weights, nWeights, MPI_FLOAT, GATHERER, 1 , MPI_COMM_WORLD);
     free(weights);
     free(status);
 }
 
+//gathers the initial weights and initiates biases for feedforward
 void recieveSetupFeedforward(NeuralNetwork* nn)
 {
     int index = 0;
+    //weights per chunk recieved
     int WeightSize = ((HL1ROWS * HL1COLUMNS) + HL1COLUMNS)/WORKERS;
-    int WeightSize2;
+    //num of weights in hiddenlayer
     int WeightHL1 = (HL1ROWS * HL1COLUMNS);
     float* weights = (float*)aligned_alloc(32, (WeightSize)*sizeof(float));
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     for (int i = 2; i < PROCESSES; i++)
     {
-    MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD, status);
+        MPI_Recv(weights, WeightSize, MPI_FLOAT, i, 1, MPI_COMM_WORLD, status);
+        
         for (int j = 0; j < WeightSize; j++)
         {
+            //weight belong to hiddenlayer if less than num of weights
+            //in hiddenlayers, else its a weight for outputlayer
             if (index < WeightHL1)
             {
                 nn->hiddenLayers[0].w[index] = weights[j];
@@ -86,15 +96,22 @@ void recieveSetupFeedforward(NeuralNetwork* nn)
             index++;
         }
     }
+    
+    //initiate biases
     for (int i = 0; i < NODESHL1; i++)
     {
         nn->hiddenLayers[0].bias[i] = 0;
     }
-    nn->outputLayer[0].bias[0] = 0;
+    for (int i = 0; i < OLCOLUMNS; i++){
+        nn->outputLayer[0].bias[i] = 0;
+    }
+    //nn->outputLayer[0].bias[0] = 0;
+    
     free(weights);
     free(status);
 }
 
+//initiate feedforward process, send all data, weights and bias
 void feedforward(NeuralNetwork* nn){
     float* empty = NULL;
     for (int i = 2; i < PROCESSES; i++)
@@ -104,8 +121,10 @@ void feedforward(NeuralNetwork* nn){
         MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
     }   
+    //work is divided to workers by row
     for (int i = 0; i < ROWS; i++)
     {
+        //printData(nn->inputLayer+(i*HL1ROWS), HL1ROWS, 1);
         MPI_Send(nn->inputLayer+(i * HL1ROWS), HL1ROWS, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
     }   
     for (int i = 2; i < PROCESSES; i++)
@@ -114,6 +133,7 @@ void feedforward(NeuralNetwork* nn){
     }
 }
 
+//calculations in feedforward part
 void handleFeedforward(){
     float* inputSlice = (float*)aligned_alloc(32, HL1ROWS*sizeof(float));
     float* weights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
@@ -121,10 +141,11 @@ void handleFeedforward(){
     float* OLweights = (float*)aligned_alloc(32, (OLROWS*OLCOLUMNS)*sizeof(float));
     float* OLbias = (float*)aligned_alloc(32, sizeof(float));
     float* HLoutput = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
-    float* OLoutput = (float*)aligned_alloc(32, sizeof(float));
+    float* OLoutput = (float*)aligned_alloc(32, OLCOLUMNS*sizeof(float));
     float* empty = NULL;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
 
+    //recv weights and biases
     MPI_Recv(weights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(bias, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
@@ -132,21 +153,32 @@ void handleFeedforward(){
 
  
     while(true){    
+        //input data is recv'd row by row
         MPI_Recv(inputSlice, HL1ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-        for (int i = 0; i < NODESHL1; i++)
+        for (int i = 0; i < HL1COLUMNS; i++)
         {
             HLoutput[i] = 0.0;
         }
-        OLoutput[0] = 0.0;
+        for (int i = 0; i < OLCOLUMNS; i++)
+        {
+            OLoutput[i] = 0.0;
+        }
+        
+        //OLoutput[0] = 0.0;
         if (status->MPI_TAG == ROWS)
             break;
         
-        //calcOutput(inputSlice,weights,bias,HLoutput,NODESHL1,HL1ROWS);
-        calcOutputAVX(inputSlice, weights, bias, HLoutput, NODESHL1, HL1ROWS);
+        //calculates outputs in hiddenlayer using weights, bias and inputdata
+        calcOutputAVX(inputSlice, weights, bias, HLoutput, HL1COLUMNS, HL1ROWS);
+        //calcOutput(inputSlice, weights, bias, HLoutput, HL1COLUMNS, HL1ROWS);
+        //calculates outputs in outputlayer using weights, bias and hiddenlayer outputs
         //calcOutput(HLoutput, OLweights, OLbias, OLoutput, OLCOLUMNS, OLROWS);
         calcOutputAVX(HLoutput, OLweights, OLbias, OLoutput, OLCOLUMNS, OLROWS);
+        
+        
+        //send output separately, outputlayer has a offset in tag
         MPI_Send(HLoutput, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
-        MPI_Send(OLoutput, 1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
+        MPI_Send(OLoutput, 1, MPI_FLOAT, EMITTER, ROWS*COLUMNS+status->MPI_TAG, MPI_COMM_WORLD);
     }
     MPI_Send(&empty, 1, MPI_FLOAT, EMITTER, ROWS, MPI_COMM_WORLD);
     free(inputSlice);
@@ -159,15 +191,16 @@ void handleFeedforward(){
     free(status);
 }
 
-void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter){ 
+/*void calcOL(float* inputSlice, float* weights, float* bias, float* output, int iter){ 
     for (int i = 0; i < iter; i++)
     {
         output[0] += weights[i]*inputSlice[i];
     }
     output[0] += bias[0];
     output[0] = sigmoid(output[0], 0);
-}
+}*/
 
+//recieves and puts the calculated data into neural network
 void reciveFeedforward(NeuralNetwork* nn){
     float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
@@ -177,16 +210,16 @@ void reciveFeedforward(NeuralNetwork* nn){
         if(status->MPI_TAG == ROWS)
             term++;
         else{
-            //printf("%d\n", (int)status->_ucount);
-            if(status->_ucount > 4){
+            //printf("%d\n", (int)status->MPI_TAG);
+            //tag-offset to separate outputlayer and hiddenlayer outputs
+            if(status->MPI_TAG < ROWS*COLUMNS){
                 for (int i = 0; i < NODESHL1; i++)
                 {
                     nn->hiddenLayers[0].output[(status->MPI_TAG*NODESHL1)+i] = output[i];
                 }
             }
             else{
-                nn->outputLayer[0].output[status->MPI_TAG] = output[0];
-                printf("%f\n", output[0]);
+                nn->outputLayer[0].output[status->MPI_TAG-(ROWS*COLUMNS)] = output[0];
             }
         }
     }
@@ -194,7 +227,8 @@ void reciveFeedforward(NeuralNetwork* nn){
    free(status);
 }
 
-
+//calculates output of layers using AVX
+//masking used to prevent overshooting sizes not multiple of AVXLOAD(8)
 void calcOutputAVX(float* inputSlice, float* weights, float* bias, float* output, int col, int row){
     
     __m256i mask;

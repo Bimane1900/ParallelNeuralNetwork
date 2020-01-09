@@ -26,7 +26,7 @@ struct NeuralNetwork{
 #define WORKERS 2
 #define PROCESSES 4
 //nodes in hiddenlayers
-#define NODESHL1 2
+#define NODESHL1 4
 //#define NODESHL2 2
 //inputLayer
 //#define ROWS 1151
@@ -42,3 +42,5 @@ struct NeuralNetwork{
 //Output Layer
 #define OLROWS NODESHL1 //connect this to previous layers col
 #define OLCOLUMNS 1
+#define FILENAME "testdata.txt" //"testdata.txt" "data.txt"
+#define LAST_CHAR_OFFSET 5 ////3 in real data, 5 in test
