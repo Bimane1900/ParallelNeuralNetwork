@@ -19,6 +19,7 @@ void freeNN(NeuralNetwork NN);
 float _mm256_find_max(__m256 vector);
 float _mm256_find_min(__m256 vector);
 void find_min_max(float* data, int rows, int columns, float* max, float* min);
+void accuracyTest(NeuralNetwork* nn);
 __m256i getAVXVectorMask(int start);
 float sum8(__m256 x);
 
@@ -40,7 +41,18 @@ void printData(float* data, int rows, int columns){
     
 }
 
-
+void accuracyTest(NeuralNetwork* nn){
+    int guesses = 0;
+    for (int i = 0; i < ROWS; i++)
+    {
+        if(nn->outputLayer[0].output[i] > 0.5f && nn->testData[i] == 1.0f)
+            guesses += 1;
+        if(nn->outputLayer[0].output[i] < 0.5f && nn->testData[i] == 0.0f)
+            guesses += 1;
+    }
+    printf("test Accuracy: %f",(float)guesses/ROWS);
+    
+}
 
 //Reads data from file and stores in float arrays
 void readInputData(char* textfile, float* data, float* correctRes){
