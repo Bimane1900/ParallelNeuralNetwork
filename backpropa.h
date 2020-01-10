@@ -39,8 +39,8 @@ void handleBackProp(){
     float* deltaErrors = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
     float* deltaErrorsHL1 = (float*)aligned_alloc(32, ROWS*NODESHL1*sizeof(float));
     float* derr2 = (float*)aligned_alloc(32, NODESHL1*NODESHL1*sizeof(float));
-    float* DeltaErrorRes = (float*)aligned_alloc(32, (COLUMNS-1)*sizeof(float));
-    float* inputLayerOut = (float*)aligned_alloc(32, (COLUMNS-1)*sizeof(float));
+    float* DeltaErrorRes = (float*)aligned_alloc(32, NODESHL1*(COLUMNS-1)*sizeof(float));
+    float* inputLayerOut = (float*)aligned_alloc(32, ROWS*sizeof(float));
     float* AccDiff = (float*)aligned_alloc(32, (ROWS)*2*sizeof(float));
     
     float* empty = NULL;
@@ -89,68 +89,55 @@ void handleBackProp(){
     //         deltaErrorsHL1[NODESHL1*i+j] = deltaErrors[i]*OLweights[j];
     //     }
     // }
-    //printData(deltaErrors,ROWS,1);
-    //printData(OLweights,NODESHL1,1);
 
     __m256 Vres, VdelErr, wei;
     for (int i = 0; i < NODESHL1; i++)
-    {
-        wei = _mm256_set1_ps(OLweights[i]);
+    {   
+        mask = getAVXVectorMask(NODESHL1-i);
+        wei = _mm256_maskload_ps(OLweights+i, mask);
         for (int j = 0; j < ROWS; j++)
         {
-            mask = getAVXVectorMask(NODESHL1-i);
-            //Vres = _mm256_set1_ps(deltaErrorsHL[j]);
-            Vres = _mm256_maskload_ps(deltaErrorsHL1+(i*NODESHL1)+j, mask);
-            //VdelErr = _mm256_maskload_ps(deltaErrors+j, mask);
+            Vres = _mm256_maskload_ps(deltaErrorsHL1+(j*NODESHL1)+i, mask);
             VdelErr = _mm256_set1_ps(deltaErrors[j]);
             Vres = _mm256_mul_ps(VdelErr, wei);
-            _mm256_maskstore_ps(deltaErrorsHL1+(i*NODESHL1)+j, mask, Vres);
-            //res[(i*NODESHL1)+j] =  w[i] * err[j];
-            //res[(i*NODESHL1)+j] =  OLweights[i] * deltaErrors[j];
+            _mm256_maskstore_ps(deltaErrorsHL1+(j*NODESHL1)+i, mask, Vres);
         }
     }
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
-    if(rank == 2)
-        printData(deltaErrorsHL1,ROWS,NODESHL1);
+    
     __m256 VsigmoidHL, VdelErrHL, HLDerr, VHLres;
     while (true)
     {
          MPI_Recv(HLoutput, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
          if(status->MPI_TAG == ROWS)
             break;
-         MPI_Recv(inputLayerOut, COLUMNS-1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+         MPI_Recv(inputLayerOut, ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         
+       
         for (int i = 0; i < NODESHL1; i++)
         {
             HLoutput[i] = sigmoid(HLoutput[i],1);
         }
-
         for (int i = 0; i < NODESHL1; i+=AVXLOAD)
         {
+             
             mask = getAVXVectorMask(NODESHL1-i);
             VsigmoidHL = _mm256_maskload_ps(HLoutput+i, mask);
             VdelErrHL = _mm256_maskload_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1)+i, mask);
             HLDerr = _mm256_mul_ps(VdelErrHL, VsigmoidHL);
             _mm256_maskstore_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1)+i, mask, HLDerr);
         }
-        
-        for (int i = 0; i < NODESHL1; i+=AVXLOAD)
-        {
-            mask = getAVXVectorMask(NODESHL1-i);
-            VdeltaErr =_mm256_maskload_ps(DeltaErrorRes+i, mask);
-            VHLoutput = _mm256_maskload_ps(inputLayerOut+(COLUMNS-1)+i, mask);
-            HLDerr = _mm256_maskload_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1)+i, mask);
-            VdeltaErr = _mm256_add_ps(VdeltaErr, _mm256_mul_ps(VHLoutput,HLDerr));
-            _mm256_maskstore_ps(DeltaErrorRes+i, mask, VdeltaErr);
-        }
-    }
 
-    
-    //printf("worker:\n");
-    //printData(deltaErrorsHL1, NODESHL1, NODESHL1);
-    //printData(DeltaErrorRes, HL1ROWS, 1);
-    //printf("1:\n");
+        HLDerr = _mm256_maskload_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1), getAVXVectorMask(NODESHL1));
+        for (int i = 0; i < COLUMNS-1; i++)
+        {
+            mask = getAVXVectorMask(NODESHL1);
+            VHLoutput = _mm256_set1_ps(inputLayerOut[i]);
+            VdeltaErr =_mm256_maskload_ps(DeltaErrorRes+NODESHL1*i, mask);
+            VdeltaErr =  _mm256_mul_ps(VHLoutput,HLDerr);
+            _mm256_maskstore_ps(DeltaErrorRes+NODESHL1*i, mask, VdeltaErr);
+        }
+        MPI_Send(DeltaErrorRes, NODESHL1*(COLUMNS-1),MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
+    }
 
 
 }
@@ -171,18 +158,16 @@ void recieveBackProp(NeuralNetwork* nn){
     int term = 0; 
     while(term != WORKERS){  
         MPI_Recv(&output, 1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-            //printf("%i",status->MPI_TAG);
             deltaErrors[status->MPI_TAG] = output;
         if(status->MPI_TAG == ROWS)
             term++;
-        //printData(deltaErrors, NODESHL1, 1);
     }
     for (int i = 2; i < PROCESSES; i++)
     {
         MPI_Send(deltaErrors, ROWS, MPI_FLOAT, i,i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT,i,i, MPI_COMM_WORLD);
     }
-
+    
      for (int i = 0; i < ROWS; i++)
     {
         MPI_Send(nn->hiddenLayers[0].output+(i*NODESHL1), NODESHL1, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
@@ -190,15 +175,38 @@ void recieveBackProp(NeuralNetwork* nn){
 
     }
 
+    
+    
     for (int i = 0; i < NODESHL1; i++)
     {
-        nn->outputLayer[0].w[i] += -1.0*deltaErrors[i];//nn->learningRate*deltaErrors[i];
+        nn->outputLayer[0].w[i] += nn->learningRate*deltaErrors[i];
     }
     
    for (int i = 2; i < PROCESSES; i++)
     {
         MPI_Send(&empty, 1, MPI_FLOAT, i, ROWS, MPI_COMM_WORLD);
     }
-
+    int recv = 0;
+    float totalsum[NODESHL1*(COLUMNS-1)]= {0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
+    float subsums[NODESHL1*(COLUMNS-1)] = {0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
+    while (true)
+    {
+        
+        MPI_Recv(subsums, NODESHL1*(COLUMNS-1), MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        for (int i = 0; i < NODESHL1*(COLUMNS-1); i++)
+        {
+            totalsum[i] += subsums[i];
+        }
+        recv++;
+        if(recv == ROWS){
+            printData(totalsum, COLUMNS-1, NODESHL1);
+            break;
+        }
+        
+    }
+    for (int i = 0; i < HL1ROWS*HL1COLUMNS; i++)
+    {
+        nn->hiddenLayers[0].w[i] += nn->learningRate*totalsum[i];
+    }
    free(status);
 }
