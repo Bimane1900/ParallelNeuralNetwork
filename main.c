@@ -76,9 +76,12 @@ int main(int argc, char** argv){
     //}
     if(rank == GATHERER){
      //printf("GATHERER\n");
-     //printData(NN.inputLayer, ROWS, HL1ROWS);
-     //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
-     
+        //printData(NN.inputLayer, ROWS, HL1ROWS);
+        //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
+        printData(NN.outputLayer[0].w, NODESHL1, OLCOLUMNS);
+        //printf("%f",NN.learningRate);  
+        //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
+        
      //printf("HIDDEN ID: %f", (NN.learningRate));
     //  for (int i = 0; i < inputsize; i++)
     //  {
@@ -90,7 +93,6 @@ int main(int argc, char** argv){
      if(rank == EMITTER){
         printf("EMITTER\n");
         //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
-        //printData(NN.outputLayer[0].output, ROWS, OLCOLUMNS);
         // for (int i = 0; i < 4; i++)
         // {    
         //     printf("\none: %f",(NN.testData[i]));
