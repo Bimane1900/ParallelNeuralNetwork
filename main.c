@@ -78,7 +78,7 @@ int main(int argc, char** argv){
      //printf("GATHERER\n");
         //printData(NN.inputLayer, ROWS, HL1ROWS);
         //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
-        printData(NN.outputLayer[0].w, NODESHL1, OLCOLUMNS);
+        //printData(NN.outputLayer[0].w, NODESHL1, OLCOLUMNS);
         //printf("%f",NN.learningRate);  
         //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
         
