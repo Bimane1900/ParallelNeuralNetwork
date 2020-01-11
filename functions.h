@@ -21,7 +21,8 @@ float _mm256_find_min(__m256 vector);
 void find_min_max(float* data, int rows, int columns, float* max, float* min);
 void accuracyTest(NeuralNetwork* nn);
 __m256i getAVXVectorMask(int start);
-float sum8(__m256 x);
+void printTime(const char* str, double time);
+float sigmoid(float x, int derivate);
 
 
 #include "featurescaling.h"
@@ -41,7 +42,23 @@ void printData(float* data, int rows, int columns){
     
 }
 
+//function used to print times, easy to disable by commenting the printf
+void printTime(const char* str, double time){
+    // if(EPOCHS == 1)
+    //     printf(str, time);
+}
+
+//neural network activation function
+float sigmoid(float x, int derivate){
+    if(derivate)
+        return x*(1-x);
+    return 1/(1+expf(-x));
+}
+
 void accuracyTest(NeuralNetwork* nn){
+    // printData(nn->outputLayer[0].output, ROWS,1);
+    // printf("testdata\n");
+    // printData(nn->testData, ROWS, 1);
     int guesses = 0;
     for (int i = 0; i < ROWS; i++)
     {
@@ -50,7 +67,7 @@ void accuracyTest(NeuralNetwork* nn){
         if(nn->outputLayer[0].output[i] < 0.5f && nn->testData[i] == 0.0f)
             guesses += 1;
     }
-    printf("test Accuracy: %f",(float)guesses/ROWS);
+    printf("test Accuracy: %f\n",(float)guesses/ROWS);
     
 }
 
@@ -145,44 +162,17 @@ __m256i getAVXVectorMask(int start){
     return mask;
 } 
 
-//summerize a __m256-vector
-//https://stackoverflow.com/questions/13219146/how-to-sum-m256-horizontally
-// x = ( x7, x6, x5, x4, x3, x2, x1, x0 )
-float sum8(__m256 x) {
-    // hiQuad = ( x7, x6, x5, x4 )
-    const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
-    // loQuad = ( x3, x2, x1, x0 )
-    const __m128 loQuad = _mm256_castps256_ps128(x);
-    // sumQuad = ( x3 + x7, x2 + x6, x1 + x5, x0 + x4 )
-    const __m128 sumQuad = _mm_add_ps(loQuad, hiQuad);
-    // loDual = ( -, -, x1 + x5, x0 + x4 )
-    const __m128 loDual = sumQuad;
-    // hiDual = ( -, -, x3 + x7, x2 + x6 )
-    const __m128 hiDual = _mm_movehl_ps(sumQuad, sumQuad);
-    // sumDual = ( -, -, x1 + x3 + x5 + x7, x0 + x2 + x4 + x6 )
-    const __m128 sumDual = _mm_add_ps(loDual, hiDual);
-    // lo = ( -, -, -, x0 + x2 + x4 + x6 )
-    const __m128 lo = sumDual;
-    // hi = ( -, -, -, x1 + x3 + x5 + x7 )
-    const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
-    // sum = ( -, -, -, x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 )
-    const __m128 sum = _mm_add_ss(lo, hi);
-    return _mm_cvtss_f32(sum);
-}
-
 NeuralNetwork initNN(int HLayers, int InputSize, int HL1W, int HL1B, int OLW){
     NeuralNetwork nn;
     nn.inputLayer = (float*)aligned_alloc(32, InputSize*sizeof(float));
     nn.testData = (float*)aligned_alloc(32, ROWS*sizeof(float));
     
     nn.hiddenLayers = (Layer*)aligned_alloc(32, HLayers*sizeof(Layer));
-    nn.hiddenLayers[0].id = (int*)aligned_alloc(32,sizeof(int));
     nn.hiddenLayers[0].w = (float*)aligned_alloc(32, HL1W*sizeof(float));
     nn.hiddenLayers[0].output = (float*)aligned_alloc(32, (ROWS*HL1COLUMNS)*sizeof(float));
     nn.hiddenLayers[0].bias = (float*)aligned_alloc(32, HL1B*sizeof(float));
 
     nn.outputLayer = (Layer*)aligned_alloc(32, sizeof(Layer));
-    nn.outputLayer[0].id = (int*)aligned_alloc(32,sizeof(int));
     nn.outputLayer[0].w = (float*)aligned_alloc(32,OLW*sizeof(float));
     nn.outputLayer[0].output = (float*)aligned_alloc(32,(ROWS*OLCOLUMNS)*sizeof(float));
     nn.outputLayer[0].bias = (float*)aligned_alloc(32,sizeof(float));
@@ -195,14 +185,12 @@ void freeNN(NeuralNetwork nn){
     free(nn.inputLayer);
     free(nn.testData);
     
-    free(nn.hiddenLayers[0].id);
     free(nn.hiddenLayers[0].w);
     free(nn.hiddenLayers[0].output);
     free(nn.hiddenLayers[0].bias);
     free(nn.hiddenLayers);
     
 
-    free(nn.outputLayer[0].id);
     free(nn.outputLayer[0].w);
     free(nn.outputLayer[0].output);
     free(nn.outputLayer[0].bias);

@@ -5,21 +5,20 @@ void recieveBackProp(NeuralNetwork* nn);
 
 void setupBackProp(NeuralNetwork* nn){
     float* empty = NULL;
-    MPI_Send(nn->hiddenLayers[0].output, ROWS*NODESHL1, MPI_FLOAT, GATHERER,0,MPI_COMM_WORLD);
 
     for (int i = 2; i < PROCESSES; i++)
     {
-        MPI_Send(nn->testData, ROWS, MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        //MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        //MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
         //MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
-        MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
+        //MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
     }
     //work is divided to workers by row
     for (int i = 0; i < ROWS; i++)
     {
         MPI_Send(nn->outputLayer[0].output+(i*OLCOLUMNS), OLCOLUMNS, MPI_FLOAT, (i%WORKERS)+2, i+(ROWS*COLUMNS), MPI_COMM_WORLD);
         MPI_Send(nn->hiddenLayers[0].output+(i*NODESHL1), NODESHL1, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
+        MPI_Send(nn->testData+i, 1, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
     }
     for (int i = 2; i < PROCESSES; i++)
     {
@@ -29,44 +28,44 @@ void setupBackProp(NeuralNetwork* nn){
 }
 
 void handleBackProp(){
-    float* testData = (float*)aligned_alloc(32, ROWS*sizeof(float));
-    float* HLweights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
-    float* HLbias = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    //float* HLweights = (float*)aligned_alloc(32, (HL1ROWS*HL1COLUMNS)*sizeof(float));
+    //float* HLbias = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
     float* OLweights = (float*)aligned_alloc(32, (OLROWS*OLCOLUMNS)*sizeof(float));
-    float* OLbias = (float*)aligned_alloc(32, OLCOLUMNS*sizeof(float));
+    //float* OLbias = (float*)aligned_alloc(32, OLCOLUMNS*sizeof(float));
     float* HLoutput = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
     float* OLoutput = (float*)aligned_alloc(32, OLCOLUMNS*sizeof(float));
-    float* deltaErrors = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
+    float* deltaErrors = (float*)aligned_alloc(32, ROWS*sizeof(float));
     float* deltaErrorsHL1 = (float*)aligned_alloc(32, ROWS*NODESHL1*sizeof(float));
     float* derr2 = (float*)aligned_alloc(32, NODESHL1*NODESHL1*sizeof(float));
     float* DeltaErrorRes = (float*)aligned_alloc(32, NODESHL1*(COLUMNS-1)*sizeof(float));
-    float* inputLayerOut = (float*)aligned_alloc(32, ROWS*sizeof(float));
-    float* AccDiff = (float*)aligned_alloc(32, (ROWS)*2*sizeof(float));
-    
+    float* inputLayerOut = (float*)aligned_alloc(32, (COLUMNS-1)*sizeof(float));
+    float* HLoutputStore = (float*)aligned_alloc(32, ROWS*NODESHL1*sizeof(float));
+    //float* AccDiff = (float*)aligned_alloc(32, (ROWS)*NODESHL1*sizeof(float));
     float* empty = NULL;
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-
-    MPI_Recv(testData, ROWS, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(HLweights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(HLbias, NODESHL1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    MPI_Recv(OLbias, 1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    //MPI_Recv(HLweights, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    //MPI_Recv(HLbias, NODESHL1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+    //MPI_Recv(OLbias, 1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     __m256 VdeltaErr;
     __m256 Vdiff;
     __m256 VHLoutput;
     __m256i mask;
-
+    float testData;
     float diff;
-    
+    double recvTime = MPI_Wtime();
     while(true){
         
         MPI_Recv(OLoutput, OLCOLUMNS, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         if(status->MPI_TAG == ROWS)
             break;
         MPI_Recv(HLoutput, NODESHL1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+        MPI_Recv(&testData, 1, MPI_FLOAT, EMITTER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         //10
-        diff = (OLoutput[0] - testData[status->MPI_TAG])/ROWS;
+        diff = (OLoutput[0] - testData)/ROWS;
         diff = diff*sigmoid(OLoutput[0], 1);
         MPI_Send(&diff, 1, MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
+        /*
+        #pragma region What is this? 
         Vdiff = _mm256_set1_ps(diff);
         for (int i = 0; i < NODESHL1; i+=AVXLOAD)
         {
@@ -76,8 +75,13 @@ void handleBackProp(){
             VdeltaErr = _mm256_add_ps(VdeltaErr, _mm256_mul_ps(VHLoutput, Vdiff));
             _mm256_maskstore_ps(deltaErrors+i, mask, VdeltaErr);
         }
+        #pragma endregion
+        */
+       //store HLoutput in a variable to contain them all for later, use tag for correct row
+       mask = getAVXVectorMask(NODESHL1);
+       _mm256_maskstore_ps(HLoutputStore+(status->MPI_TAG*NODESHL1), mask, _mm256_maskload_ps(HLoutput, mask));
     }
-
+    printTime("Took %f to recv OLoutput,HLoutput,testData & send diffs\n", MPI_Wtime()-recvTime);
     MPI_Send(&empty, 1, MPI_FLOAT, GATHERER, ROWS, MPI_COMM_WORLD);
     MPI_Recv(deltaErrors, ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
@@ -90,6 +94,7 @@ void handleBackProp(){
     //     }
     // }
 
+    #pragma region deltaErrorsHL1 = OLWeights * deltaErrors
     __m256 Vres, VdelErr, wei;
     for (int i = 0; i < NODESHL1; i++)
     {   
@@ -103,30 +108,36 @@ void handleBackProp(){
             _mm256_maskstore_ps(deltaErrorsHL1+(j*NODESHL1)+i, mask, Vres);
         }
     }
+    #pragma endregion
     
     __m256 VsigmoidHL, VdelErrHL, HLDerr, VHLres;
+    recvTime = MPI_Wtime();
     while (true)
     {
-         MPI_Recv(HLoutput, NODESHL1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
+         MPI_Recv(inputLayerOut, (COLUMNS-1), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
          if(status->MPI_TAG == ROWS)
             break;
-         MPI_Recv(inputLayerOut, ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         
-       
+        #pragma region HLoutput = sigmoid(HLoutput)
         for (int i = 0; i < NODESHL1; i++)
         {
-            HLoutput[i] = sigmoid(HLoutput[i],1);
+            HLoutputStore[(status->MPI_TAG*NODESHL1)+i] = sigmoid(HLoutputStore[(status->MPI_TAG*NODESHL1)+i],1);
         }
+        #pragma endregion
+
+        #pragma region deltaErrorsHL1 = deltaErrorsHL1 * HLoutput 
         for (int i = 0; i < NODESHL1; i+=AVXLOAD)
         {
              
             mask = getAVXVectorMask(NODESHL1-i);
-            VsigmoidHL = _mm256_maskload_ps(HLoutput+i, mask);
+            VsigmoidHL = _mm256_maskload_ps(HLoutputStore+(status->MPI_TAG*NODESHL1)+i, mask);
             VdelErrHL = _mm256_maskload_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1)+i, mask);
             HLDerr = _mm256_mul_ps(VdelErrHL, VsigmoidHL);
             _mm256_maskstore_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1)+i, mask, HLDerr);
         }
+        #pragma endregion
 
+        #pragma region DeltaErrorRes = deltaErrorsHL1*inputLayerOut
         HLDerr = _mm256_maskload_ps(deltaErrorsHL1+(status->MPI_TAG*NODESHL1), getAVXVectorMask(NODESHL1));
         for (int i = 0; i < COLUMNS-1; i++)
         {
@@ -136,77 +147,87 @@ void handleBackProp(){
             VdeltaErr =  _mm256_mul_ps(VHLoutput,HLDerr);
             _mm256_maskstore_ps(DeltaErrorRes+NODESHL1*i, mask, VdeltaErr);
         }
+        #pragma endregion
+        
         MPI_Send(DeltaErrorRes, NODESHL1*(COLUMNS-1),MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);
     }
+    printTime("Took %f to HLoutput,inputLayerout & send DeltaErrorRes\n", MPI_Wtime()-recvTime);
 
-
+    free(HLoutputStore);
+    free(status);
+    free(derr2);
+    free(DeltaErrorRes);
+    free(OLweights);
+    free(HLoutput);
+    free(OLoutput);
+    free(deltaErrors);
+    free(deltaErrorsHL1);
+    free(inputLayerOut);
 }
 
 
 void recieveBackProp(NeuralNetwork* nn){
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
-    MPI_Recv(nn->hiddenLayers[0].output, ROWS*NODESHL1, MPI_FLOAT, EMITTER, MPI_ANY_TAG ,MPI_COMM_WORLD,status);
-    float* deltaErrors = (float*)aligned_alloc(32, ROWS*sizeof(float));
+    float* outputDeltaErr = (float*)aligned_alloc(32, ROWS*sizeof(float));
     float output;
     float* empty = NULL;
     //aligned_alloc did not initate value to 0
     for (int i = 0; i < ROWS; i++)
     {
-        deltaErrors[i] = 0.0f;
+        outputDeltaErr[i] = 0.0f;
     }
     float dErr = 0.0;
     int term = 0; 
     while(term != WORKERS){  
         MPI_Recv(&output, 1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-            deltaErrors[status->MPI_TAG] = output;
+            outputDeltaErr[status->MPI_TAG] = output;
         if(status->MPI_TAG == ROWS)
             term++;
     }
+
     for (int i = 2; i < PROCESSES; i++)
     {
-        MPI_Send(deltaErrors, ROWS, MPI_FLOAT, i,i, MPI_COMM_WORLD);
+        MPI_Send(outputDeltaErr, ROWS, MPI_FLOAT, i,i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT,i,i, MPI_COMM_WORLD);
     }
-    
+
      for (int i = 0; i < ROWS; i++)
     {
-        MPI_Send(nn->hiddenLayers[0].output+(i*NODESHL1), NODESHL1, MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
         MPI_Send(nn->inputLayer+(i*(COLUMNS-1)), (COLUMNS-1), MPI_FLOAT, (i%WORKERS)+2, i, MPI_COMM_WORLD);
-
     }
 
-    
-    
-    for (int i = 0; i < NODESHL1; i++)
-    {
-        nn->outputLayer[0].w[i] += nn->learningRate*deltaErrors[i];
-    }
-    
-   for (int i = 2; i < PROCESSES; i++)
+    for (int i = 2; i < PROCESSES; i++)
     {
         MPI_Send(&empty, 1, MPI_FLOAT, i, ROWS, MPI_COMM_WORLD);
     }
+
     int recv = 0;
-    float totalsum[NODESHL1*(COLUMNS-1)]= {0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
-    float subsums[NODESHL1*(COLUMNS-1)] = {0.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
+    float hiddenLayerDeltaErr[NODESHL1*(COLUMNS-1)] = {0.0f};
+    float subsums[NODESHL1*(COLUMNS-1)] = {0.0f};
     while (true)
     {
         
         MPI_Recv(subsums, NODESHL1*(COLUMNS-1), MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         for (int i = 0; i < NODESHL1*(COLUMNS-1); i++)
         {
-            totalsum[i] += subsums[i];
+            hiddenLayerDeltaErr[i] += subsums[i];
         }
         recv++;
         if(recv == ROWS){
-            printData(totalsum, COLUMNS-1, NODESHL1);
             break;
         }
         
     }
+    //update weights in outputLayer
+    for (int i = 0; i < NODESHL1; i++)
+    {
+        nn->outputLayer[0].w[i] += -1.0*nn->learningRate*outputDeltaErr[i];
+    }
+    //update weights in hiddenLayer
     for (int i = 0; i < HL1ROWS*HL1COLUMNS; i++)
     {
-        nn->hiddenLayers[0].w[i] += nn->learningRate*totalsum[i];
+        nn->hiddenLayers[0].w[i] += -1.0*nn->learningRate*hiddenLayerDeltaErr[i];
     }
    free(status);
+   free(outputDeltaErr);
 }
