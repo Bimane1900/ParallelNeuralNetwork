@@ -71,10 +71,23 @@ void accuracyTest(NeuralNetwork* nn){
     
 }
 
+void initDummies(float* data, float* correctRes){
+    for (int i = 0; i < ROWS*(COLUMNS-1); i++)
+    {
+        data[i] = 1.1f;
+    }
+    
+    for (int i = 0; i < ROWS; i++)
+    {
+        correctRes[i] = 1.1f;
+    }
+    
+}
+
 //Reads data from file and stores in float arrays
 void readInputData(char* textfile, float* data, float* correctRes){
     FILE *fp;
-    char *str = (char*)malloc(200);
+    char *str = (char*)malloc(2000);
     char *temp = NULL;
  
     fp = fopen(textfile, "r");
@@ -84,7 +97,7 @@ void readInputData(char* textfile, float* data, float* correctRes){
     else{
         int lastCharInd = 0;
         int i=0, j=0;
-        while (fgets(str, 200, fp) != NULL){
+        while (fgets(str, 2000, fp) != NULL){
             lastCharInd = strlen(str)-LAST_CHAR_OFFSET;//-3 in real data -5 test
             temp = str;
             //correctRes should have last digit per row, which is testing data

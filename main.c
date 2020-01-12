@@ -23,6 +23,7 @@ int main(int argc, char** argv){
     if(rank == EMITTER){
         NN = initNN(hiddenlayers,inputsize,HL1Weights,HL1Bias,OLWeights);
         readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
+        //initDummies(NN.inputLayer, NN.testData);
         setupFeatureScaling(NN.inputLayer, inputsize);
     }
     else if (rank == GATHERER){
@@ -39,6 +40,7 @@ int main(int argc, char** argv){
     }
     else if (rank == GATHERER){
         recieveInitialWeights(&NN);
+        printf("Dimensions: %dx%d\n", ROWS, COLUMNS);
         printf("Beginning training...\n");
     }
     else{

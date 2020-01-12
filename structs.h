@@ -11,7 +11,7 @@ struct Layer{
 struct NeuralNetwork{
     Layer *hiddenLayers;
     Layer *outputLayer;
-    double learningRate = 0.07f;
+    double learningRate = 0.9f;
     float *inputLayer;
     float *testData;
 } typedef NeuralNetwork;
@@ -19,13 +19,13 @@ struct NeuralNetwork{
 #define AVXLOAD 8
 #define EMITTER 0
 #define GATHERER 1
-#define WORKERS 4
+#define WORKERS 1
 #define PROCESSES (WORKERS+2)
 //nodes in hiddenlayers
 #define NODESHL1 7
 //inputLayer
-#define ROWS 1151
-#define COLUMNS 20
+#define ROWS 1151//800//9000//10000000//1151
+#define COLUMNS 20//100000//9000//8//20
 //#define ROWS 4 //testing NN
 //#define COLUMNS 4
 //HiddenLayer1
@@ -37,4 +37,4 @@ struct NeuralNetwork{
 //data macros
 #define FILENAME "data.txt" //"testdata.txt" "data.txt"
 #define LAST_CHAR_OFFSET 3 ////3 in real data, 5 in test
-#define EPOCHS 1000
+#define EPOCHS 1

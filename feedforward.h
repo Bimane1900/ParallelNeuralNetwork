@@ -104,6 +104,7 @@ void recieveInitialWeights(NeuralNetwork* nn)
 //initiate feedforward process, send all data, weights and bias
 void startFeedforward(NeuralNetwork* nn){
     float* empty = NULL;
+    double sendTime = MPI_Wtime();
     for (int i = 2; i < PROCESSES; i++)
     {
         MPI_Send(nn->hiddenLayers[0].w, (HL1ROWS*HL1COLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
@@ -120,6 +121,7 @@ void startFeedforward(NeuralNetwork* nn){
     {
         MPI_Send(&empty, 1, MPI_FLOAT, i, ROWS, MPI_COMM_WORLD);
     }
+    printTime("startFeedforward took %f\n", MPI_Wtime()-sendTime);
 }
 
 //calculations in feedforward part
@@ -140,7 +142,7 @@ void handleFeedforward(){
     MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(OLbias, 1, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
 
- 
+    double feedforwardTime = MPI_Wtime();
     while(true){    
         //input data is recv'd row by row
         MPI_Recv(inputSlice, HL1ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
@@ -164,6 +166,7 @@ void handleFeedforward(){
         MPI_Send(HLoutput, NODESHL1, MPI_FLOAT, EMITTER, status->MPI_TAG, MPI_COMM_WORLD);
         MPI_Send(OLoutput, 1, MPI_FLOAT, EMITTER, ROWS*COLUMNS+status->MPI_TAG, MPI_COMM_WORLD);
     }
+    printTime("handleFeedforward: calculations complete %f\n", MPI_Wtime()-feedforwardTime);
     MPI_Send(&empty, 1, MPI_FLOAT, EMITTER, ROWS, MPI_COMM_WORLD);
     free(inputSlice);
     free(weights);
@@ -180,6 +183,7 @@ void recieveFeedforwardOutputs(NeuralNetwork* nn){
     float* output = (float*)aligned_alloc(32, NODESHL1*sizeof(float));
     MPI_Status *status = (MPI_Status*)malloc(sizeof(MPI_Status));
     int term = 0; 
+    double recieveTime = MPI_Wtime();
     while(term != WORKERS){  
         MPI_Recv(output, NODESHL1, MPI_FLOAT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, status);
         if(status->MPI_TAG == ROWS)
@@ -197,6 +201,7 @@ void recieveFeedforwardOutputs(NeuralNetwork* nn){
             }
         }
     }
+    printTime("recieveFeedforwardOutputs: %f\n", MPI_Wtime()-recieveTime);
    free(output);
    free(status);
 }
