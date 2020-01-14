@@ -86,13 +86,14 @@ void handleBackProp(){
         #pragma endregion
         */
        //store HLoutput in a variable to contain them all for later, use tag for correct row
-       _mm256_maskstore_ps(HLoutputStore+(status->MPI_TAG*NODESHL1), mask, _mm256_maskload_ps(HLoutput, mask));
+        _mm256_maskstore_ps(HLoutputStore+(status->MPI_TAG*NODESHL1), mask, _mm256_maskload_ps(HLoutput, mask));
     }
-    printTime("Took %f to recv OLoutput,HLoutput,testData & send diffs\n", MPI_Wtime()-recvTime);
+    printTime("###Took %f to recv OLoutput,HLoutput,testData & send diffs\n", MPI_Wtime()-recvTime);
+    recvTime = MPI_Wtime();
     MPI_Send(&empty, 1, MPI_FLOAT, GATHERER, ROWS, MPI_COMM_WORLD);
     MPI_Recv(deltaErrors, ROWS, MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
     MPI_Recv(OLweights, (OLROWS*OLCOLUMNS), MPI_FLOAT, GATHERER, MPI_ANY_TAG, MPI_COMM_WORLD, status);
-    
+    printTime("###Took %f to send empty, recv deltaErrors and OLwiehgts\n", MPI_Wtime()-recvTime);
     // for (int i = 0; i < ROWS; i++)
     // {
     //     for (int j = 0; j < NODESHL1; j++)
@@ -100,7 +101,7 @@ void handleBackProp(){
     //         deltaErrorsHL1[NODESHL1*i+j] = deltaErrors[i]*OLweights[j];
     //     }
     // }
-
+    recvTime = MPI_Wtime();
     #pragma region deltaErrorsHL1 = OLWeights * deltaErrors
     __m256 Vres, VdelErr, wei;
     for (int i = 0; i < NODESHL1; i++)
@@ -116,6 +117,7 @@ void handleBackProp(){
         }
     }
     #pragma endregion
+    printTime("###Took %f to compute deltaErrorsHL1\n", MPI_Wtime()-recvTime);
     
     __m256 VsigmoidHL, VdelErrHL, HLDerr, VHLres;
     recvTime = MPI_Wtime();
@@ -158,8 +160,8 @@ void handleBackProp(){
     }
     MPI_Send(DeltaErrorRes, NODESHL1*(COLUMNS-1),MPI_FLOAT, GATHERER, status->MPI_TAG, MPI_COMM_WORLD);   
     
-    printTime("Took %f to HLoutput,inputLayerout & send DeltaErrorRes\n", MPI_Wtime()-recvTime);
-
+    printTime("###Took %f to HLoutput,inputLayerout & send DeltaErrorRes\n", MPI_Wtime()-recvTime);
+    recvTime = MPI_Wtime();
     free(HLoutputStore);
     free(status);
     free(derr2);
@@ -170,6 +172,7 @@ void handleBackProp(){
     free(deltaErrors);
     free(deltaErrorsHL1);
     free(inputLayerOut);
+    printTime("###Took %f to free data structures in handle Backprop\n", MPI_Wtime()-recvTime);
 }
 
 
@@ -194,11 +197,13 @@ void recieveBackProp(NeuralNetwork* nn){
     }
     printTime("output deltaErr gathered, %f\n", MPI_Wtime()-localTime);
 
+    localTime= MPI_Wtime();
     for (int i = 2; i < PROCESSES; i++)
     {
         MPI_Send(outputDeltaErr, ROWS, MPI_FLOAT, i,i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT,i,i, MPI_COMM_WORLD);
     }
+    printTime("Gatherer sent OLLayer.w & outputDeltaErr: %f\n",MPI_Wtime()-localTime);
 
      for (int i = 0; i < ROWS; i++)
     {

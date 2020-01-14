@@ -9,7 +9,7 @@
 #include "stdio.h"
 #include "string.h"
 //#include "FF.c"
-
+#include <sys/time.h>
 #include "structs.h"
 
 void printData(float* data, int rows, int columns);

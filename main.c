@@ -14,6 +14,7 @@ int main(int argc, char** argv){
         printf("Processes needed: %d\n", PROCESSES);
         return 0;
     }
+    while(nOfRows > 9){
     int hiddenlayers = 1;
     int inputsize = ROWS*(COLUMNS-1);
     int HL1Weights = HL1ROWS*HL1COLUMNS;
@@ -22,8 +23,9 @@ int main(int argc, char** argv){
     double totalTime = MPI_Wtime();
     if(rank == EMITTER){
         NN = initNN(hiddenlayers,inputsize,HL1Weights,HL1Bias,OLWeights);
-        readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
-        //initDummies(NN.inputLayer, NN.testData);
+        printf("Preparing data..\n");
+        //readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
+        initDummies(NN.inputLayer, NN.testData);
         setupFeatureScaling(NN.inputLayer, inputsize);
     }
     else if (rank == GATHERER){
@@ -47,38 +49,57 @@ int main(int argc, char** argv){
         initiateWeights();
     }
     MPI_Barrier(MPI_COMM_WORLD);
+
     totalTime = MPI_Wtime();
+    double localTime = MPI_Wtime();
     int epoch = EPOCHS;
     while(epoch){
         if (rank == GATHERER){
+            localTime = MPI_Wtime();
             startFeedforward(&NN);
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, startfeedforward %f\n", localTime);
+            localTime = MPI_Wtime();
             recieveBackProp(&NN);
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, recievBackProp %f\n", localTime);
         }
         else if(rank == EMITTER){
+            localTime = MPI_Wtime();
             recieveFeedforwardOutputs(&NN);
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, reciveFeedforward %f\n", localTime);
+            localTime = MPI_Wtime();
             setupBackProp(&NN);
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, setupbackprop %f\n", localTime);
         }
         else{
+            localTime = MPI_Wtime();
             handleFeedforward();
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, handleFeedforwad %f\n", localTime);
+            localTime = MPI_Wtime();
             handleBackProp();
+            localTime = MPI_Wtime()-localTime;
+            printTime("-----------main, handleBackprop %f\n", localTime);
         }
         --epoch;
         MPI_Barrier(MPI_COMM_WORLD);
     }
+
     if(rank == GATHERER){
-        //printData(NN.inputLayer, ROWS, HL1ROWS);
-        //printData(NN.hiddenLayers[0].w, HL1ROWS, HL1COLUMNS);
-        //printData(NN.outputLayer[0].w, NODESHL1, OLCOLUMNS);
-        //printData(NN.hiddenLayers[0].output, ROWS, HL1COLUMNS);
         freeNN(NN);
     }
      if(rank == EMITTER){
         totalTime = MPI_Wtime() - totalTime;
         printf("Training complete, took %f\n", totalTime);
-        accuracyTest(&NN);
+        //accuracyTest(&NN);
         freeNN(NN); 
     }
-    
+    nOfRows /= 2;
+    nOfColumns *= 2;
+    }
     MPI_Finalize();
     
     return 0;

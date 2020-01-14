@@ -111,7 +111,7 @@ void startFeedforward(NeuralNetwork* nn){
         MPI_Send(nn->hiddenLayers[0].bias, NODESHL1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].w, (OLROWS*OLCOLUMNS), MPI_FLOAT, i, i, MPI_COMM_WORLD);
         MPI_Send(nn->outputLayer[0].bias, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD);
-    }   
+    }       
     //work is divided to workers by row
     for (int i = 0; i < ROWS; i++)
     {
