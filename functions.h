@@ -23,9 +23,8 @@ void accuracyTest(NeuralNetwork* nn);
 __m256i getAVXVectorMask(int start);
 void printTime(const char* str, double time);
 float sigmoid(float x, int derivate);
+void printMeasureToFile(const char* measuredTimes[],int n);
 const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns);
-
-
 #include "featurescaling.h"
 #include "feedforward.h"
 #include "backpropa.h"
@@ -48,6 +47,20 @@ void printData(float* data, int rows, int columns){
     }
     
 }
+
+void printMeasureToFile(const char* measuredTimes[], int n){
+    FILE *fptr;
+    fptr = fopen("plotdata.txt","w");
+    if(fptr == NULL)
+    {
+    printf("Error in writing file for plotData");   
+    }
+    for (int i = 0; i < n; i++)
+    {
+        fprintf(fptr,"%s",measuredTimes[i]);
+    }
+    fclose(fptr);
+    }
 
 //function used to print times, easy to disable by commenting the printf
 void printTime(const char* str, double time){

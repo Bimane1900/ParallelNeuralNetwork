@@ -111,7 +111,7 @@ int main(int argc, char** argv){
         {
             printf("%s",measures[i]);
         }
-        
+        printMeasureToFile(measures,iterations);
     }
     MPI_Finalize();
     
