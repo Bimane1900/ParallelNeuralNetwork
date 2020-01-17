@@ -38,4 +38,4 @@ int nOfColumns = 4;
 //data macros
 #define FILENAME "data.txt" //"testdata.txt" "data.txt"
 #define LAST_CHAR_OFFSET 3 ////3 in real data, 5 in test
-#define EPOCHS 1
+#define EPOCHS 5

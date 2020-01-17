@@ -24,9 +24,16 @@ __m256i getAVXVectorMask(int start);
 void printTime(const char* str, double time);
 float sigmoid(float x, int derivate);
 void printMeasureToFile(const char* measuredTimes[],int n);
+const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns);
 #include "featurescaling.h"
 #include "feedforward.h"
 #include "backpropa.h"
+
+const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns){
+    const char* s =(const char*) malloc(30);
+    sprintf((char*)s, "%d,%d,%f\n", nOfRows, nOfColumns, totalTime);
+    return s;
+}
 
 void printData(float* data, int rows, int columns){
     for (int i = 0; i < rows; i++)
@@ -43,14 +50,14 @@ void printData(float* data, int rows, int columns){
 
 void printMeasureToFile(const char* measuredTimes[], int n){
     FILE *fptr;
-    fptr = fopen(filename","w");
+    fptr = fopen("plotdata.txt","w");
     if(fptr == NULL)
     {
     printf("Error in writing file for plotData");   
     }
     for (int i = 0; i < n; i++)
     {
-        fprintf(fptr,measuredTimes[i]);
+        fprintf(fptr,"%s",measuredTimes[i]);
     }
     fclose(fptr);
     }
