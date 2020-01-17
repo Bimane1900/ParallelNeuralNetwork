@@ -10,11 +10,15 @@ int main(int argc, char** argv){
     NeuralNetwork NN;
     MPI_Comm_size(MPI_COMM_WORLD, &size); 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
+    const char* measures[21];
+    measures[0] = "ROWS, COLUMNS, TIME\n";
+    int iterations = 1;
     if(size != PROCESSES){
         printf("Processes needed: %d\n", PROCESSES);
         return 0;
     }
-    while(nOfRows > 9){
+    while(nOfRows > 128){
+        //nOfRows = 1;
     int hiddenlayers = 1;
     int inputsize = ROWS*(COLUMNS-1);
     int HL1Weights = HL1ROWS*HL1COLUMNS;
@@ -94,11 +98,20 @@ int main(int argc, char** argv){
      if(rank == EMITTER){
         totalTime = MPI_Wtime() - totalTime;
         printf("Training complete, took %f\n", totalTime);
-        //accuracyTest(&NN);
+        measures[iterations] = saveMeasuredTime(totalTime, nOfRows, nOfColumns);
+        iterations++;
+        accuracyTest(&NN);
         freeNN(NN); 
     }
     nOfRows /= 2;
     nOfColumns *= 2;
+    }
+    if(rank == EMITTER){
+        for (int i = 0; i < iterations; i++)
+        {
+            printf("%s",measures[i]);
+        }
+        
     }
     MPI_Finalize();
     
