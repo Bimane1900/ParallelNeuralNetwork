@@ -15,8 +15,8 @@ struct NeuralNetwork{
     float *inputLayer;
     float *testData;
 } typedef NeuralNetwork;
-int nOfRows= 8388608;
-int nOfColumns = 4;
+int nOfRows= 262144;
+int nOfColumns = 128;
 #define AVXLOAD 8
 #define EMITTER 0
 #define GATHERER 1

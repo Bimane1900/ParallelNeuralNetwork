@@ -11,7 +11,7 @@ int main(int argc, char** argv){
     MPI_Comm_size(MPI_COMM_WORLD, &size); 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
     const char* measures[21];
-    measures[0] = "ROWS, COLUMNS, TIME\n";
+    measures[0] = "TIME, ROWSxCOLUMNS\n";
     int iterations = 1;
     if(size != PROCESSES){
         printf("Processes needed: %d\n", PROCESSES);

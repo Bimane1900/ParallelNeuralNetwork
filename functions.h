@@ -32,7 +32,7 @@ const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns);
 
 const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns){
     const char* s =(const char*) malloc(30);
-    sprintf((char*)s, "%d,%d,%f\n", nOfRows, nOfColumns, totalTime);
+    sprintf((char*)s, "%f,%dx%d\n", totalTime, nOfRows, nOfColumns);
     return s;
 }
 
