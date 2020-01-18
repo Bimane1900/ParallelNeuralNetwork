@@ -11,7 +11,7 @@ struct Layer{
 struct NeuralNetwork{
     Layer *hiddenLayers;
     Layer *outputLayer;
-    double learningRate = 0.9f;
+    double learningRate = 0.5f;
     float *inputLayer;
     float *testData;
 } typedef NeuralNetwork;
@@ -25,8 +25,8 @@ int nOfColumns = 128;
 //nodes in hiddenlayers
 #define NODESHL1 7
 //inputLayer
-#define ROWS nOfRows//10000000//800//8944//10000000//1151
-#define COLUMNS nOfColumns//8//100000//8944//8//20
+#define ROWS 4//1151
+#define COLUMNS 4//20
 //#define ROWS 4 //testing NN
 //#define COLUMNS 4
 //HiddenLayer1
@@ -36,6 +36,6 @@ int nOfColumns = 128;
 #define OLROWS NODESHL1 //connect this to previous layers col
 #define OLCOLUMNS 1
 //data macros
-#define FILENAME "data.txt" //"testdata.txt" "data.txt"
-#define LAST_CHAR_OFFSET 3 ////3 in real data, 5 in test
-#define EPOCHS 5
+#define FILENAME "testdata.txt" //"testdata.txt" "data.txt"
+#define LAST_CHAR_OFFSET 5 ////3 in real data, 5 in test
+#define EPOCHS 5000

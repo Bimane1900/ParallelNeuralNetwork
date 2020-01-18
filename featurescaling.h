@@ -1,4 +1,6 @@
-
+/*
+    Feature scaling functions
+*/
 void setupFeatureScaling(float *data, int n);
 void featureScale(float *inputData, float max, float min, int n);
 void handleFeatureScaling(int n);

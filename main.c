@@ -11,14 +11,14 @@ int main(int argc, char** argv){
     MPI_Comm_size(MPI_COMM_WORLD, &size); 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
     const char* measures[21];
-    measures[0] = "TIME, ROWSxCOLUMNS\n";
+    measures[0] = "ROWSxCOLUMNS,TIME\n";
     int iterations = 1;
     if(size != PROCESSES){
         printf("Processes needed: %d\n", PROCESSES);
         return 0;
     }
-    while(nOfRows > 128){
-        //nOfRows = 1;
+    //used this while-loop to run different rows/columns in same execution
+    //while(nOfRows > 128){
     int hiddenlayers = 1;
     int inputsize = ROWS*(COLUMNS-1);
     int HL1Weights = HL1ROWS*HL1COLUMNS;
@@ -28,8 +28,8 @@ int main(int argc, char** argv){
     if(rank == EMITTER){
         NN = initNN(hiddenlayers,inputsize,HL1Weights,HL1Bias,OLWeights);
         printf("Preparing data..\n");
-        //readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
-        initDummies(NN.inputLayer, NN.testData);
+        readInputData((char*)FILENAME, NN.inputLayer, NN.testData);
+        //initDummies(NN.inputLayer, NN.testData);
         setupFeatureScaling(NN.inputLayer, inputsize);
     }
     else if (rank == GATHERER){
@@ -103,15 +103,12 @@ int main(int argc, char** argv){
         accuracyTest(&NN);
         freeNN(NN); 
     }
-    nOfRows /= 2;
-    nOfColumns *= 2;
-    }
+    //multiply columns, divide rows will give is different shapes of matrixes
+    //nOfRows /= 2;
+    //nOfColumns *= 2;
+    //}
     if(rank == EMITTER){
-        for (int i = 0; i < iterations; i++)
-        {
-            printf("%s",measures[i]);
-        }
-        printMeasureToFile(measures,iterations);
+        //printMeasureToFile(measures,iterations);
     }
     MPI_Finalize();
     

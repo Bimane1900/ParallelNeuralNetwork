@@ -1,5 +1,5 @@
 /*
-    Functions for the Neural Network
+    General functions for the Neural Network
 */
 
 #include "math.h"
@@ -29,9 +29,10 @@ const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns);
 #include "feedforward.h"
 #include "backpropa.h"
 
+//saves the average time and dimensions to an array in csv format
 const char* saveMeasuredTime(double totalTime, int nOfRows, int nOfColumns){
     const char* s =(const char*) malloc(30);
-    sprintf((char*)s, "%f,%dx%d\n", totalTime, nOfRows, nOfColumns);
+    sprintf((char*)s, "%dx%d,%f\n",nOfRows, nOfColumns,totalTime/EPOCHS);
     return s;
 }
 
@@ -48,19 +49,23 @@ void printData(float* data, int rows, int columns){
     
 }
 
+//prints all measured times from array to a csv file
 void printMeasureToFile(const char* measuredTimes[], int n){
     FILE *fptr;
-    fptr = fopen("plotdata.txt","w");
+    char* filename = (char*)malloc(30);
+    sprintf(filename, "plotdata_%d_workers.csv", WORKERS);
+    fptr = fopen(filename,"w");
     if(fptr == NULL)
     {
-    printf("Error in writing file for plotData");   
+        printf("Error in writing file for plotData");   
     }
-    for (int i = 0; i < n; i++)
-    {
-        fprintf(fptr,"%s",measuredTimes[i]);
-    }
+        for (int i = 0; i < n; i++)
+        {
+            fprintf(fptr,"%s",measuredTimes[i]);
+        }
+    free(filename);
     fclose(fptr);
-    }
+}
 
 //function used to print times, easy to disable by commenting the printf
 void printTime(const char* str, double time){
@@ -76,9 +81,12 @@ float sigmoid(float x, int derivate){
 }
 
 void accuracyTest(NeuralNetwork* nn){
-    // printData(nn->outputLayer[0].output, ROWS,1);
-    // printf("testdata\n");
-    // printData(nn->testData, ROWS, 1);
+    if(FILENAME == "testdata.txt"){
+        printData(nn->outputLayer[0].output, ROWS,1);
+        printf("testdata\n");
+        printData(nn->testData, ROWS, 1);
+    }
+    
     int guesses = 0;
     for (int i = 0; i < ROWS; i++)
     {
@@ -91,6 +99,7 @@ void accuracyTest(NeuralNetwork* nn){
     
 }
 
+//Used to init dummy data for measuring big input sizes
 void initDummies(float* data, float* correctRes){
     for (int i = 0; i < ROWS*(COLUMNS-1); i++)
     {
